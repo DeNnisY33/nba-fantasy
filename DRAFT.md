@@ -2,6 +2,11 @@
 
 > 建議版本（2026-11-02）。標註「⚠️ 待確認」的項目請聯盟討論後決定。
 > 賽季中的計分、遞補、揮棄、交易規則請看 [RULES.md](RULES.md)。
+>
+> **2K 能力值查詢**
+> - 全部球員（依球隊）：https://www.2kratings.com/current-teams
+> - 2K 官方前 100 名：https://nba.2k.com/zh-TW/2k27/top-100-ratings/
+> - 聯盟網站的自由球員名單（含能力值，可搜尋）：https://dennisy33.github.io/nba-fantasy/#team
 
 ---
 
