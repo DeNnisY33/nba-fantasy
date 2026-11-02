@@ -105,6 +105,16 @@ def parse_summary(summary: dict, game_id: str, game_date: date) -> list[dict]:
     teams = (summary.get("boxscore") or {}).get("players") or []
     abbrs = [((t.get("team") or {}).get("abbreviation") or "") for t in teams]
 
+    # 勝負：header.competitions[0].competitors[].winner（比賽結束才有 true/false）
+    won_by_team: dict[str, bool] = {}
+    comps = ((summary.get("header") or {}).get("competitions") or [{}])[0].get("competitors") or []
+    for c in comps:
+        ab = (c.get("team") or {}).get("abbreviation")
+        if ab and isinstance(c.get("winner"), bool):
+            won_by_team[ab] = c["winner"]
+    if len(won_by_team) == 2 and len(set(won_by_team.values())) != 2:
+        won_by_team = {}  # 資料不完整（例如兩隊都不是贏家）就先不記錄
+
     for idx, team_block in enumerate(teams):
         team = abbrs[idx] if idx < len(abbrs) else ""
         opponent = abbrs[1 - idx] if len(abbrs) == 2 else ""
@@ -124,6 +134,7 @@ def parse_summary(summary: dict, game_id: str, game_date: date) -> list[dict]:
                     "pts": 0, "reb": 0, "oreb": 0, "dreb": 0, "ast": 0, "stl": 0, "blk": 0,
                     "tov": 0, "pf": 0, "fgm": 0, "fga": 0, "fg3m": 0, "fg3a": 0,
                     "ftm": 0, "fta": 0, "plus_minus": 0,
+                    "team_won": won_by_team.get(team),
                 }
                 for label, value in zip(labels, a.get("stats") or []):
                     key = LABEL_MAP.get(str(label).upper())

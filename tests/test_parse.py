@@ -70,6 +70,13 @@ def main():
     for r in rows:
         assert r["reb"] == r["oreb"] + r["dreb"], r
         assert r["did_not_play"] or r["pts"] == 2 * r["fgm"] + r["fg3m"] + r["ftm"], r
+    assert all(r["team_won"] is None for r in rows), "no header → unknown result"
+    # 勝負：結構取自同一場的 ESPN header（LAL 131 : TOR 125）
+    real["header"] = {"competitions": [{"competitors": [
+        {"homeAway": "home", "winner": True, "score": "131", "team": {"abbreviation": "LAL"}},
+        {"homeAway": "away", "winner": False, "score": "125", "team": {"abbreviation": "TOR"}}]}]}
+    rows = parse_summary(real, "401909906", date(2026, 11, 1))
+    assert all(r["team_won"] is (r["team"] == "LAL") for r in rows), "LAL won, TOR lost"
     print("parse_summary (real ESPN 2026-11-01): all checks passed")
 
     # 傷兵：結構取自 2026-11-02 的 ESPN 回應（athlete 沒有 id，要從連結解析）

@@ -480,6 +480,7 @@ function renderWeekly() {
       <td class="hide-sm" style="height:30px">${bars}</td></tr>`;
   }).join("");
 }
+const wl = (w) => w == null ? "" : ` <span class="chip ${w ? "ok" : "out"}" style="font-size:11px;padding:0 5px">${w ? "勝" : "敗"}</span>`;
 const lastName = (n) => String(n).split(" ").filter((w) => !/^(Jr\.?|Sr\.?|II|III|IV)$/i.test(w)).slice(-1)[0] || n;
 const addDays = (d, n) => { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
@@ -493,7 +494,7 @@ async function renderDaily() {
   if (!day) { $("boxes").innerHTML = `<div class="empty">還沒有比賽數據。</div>`; return; }
   if (!S.dayCache[day]) {
     $("boxes").innerHTML = `<div class="empty">載入 ${day}…</div>`;
-    S.dayCache[day] = await apiAll(`member_player_games?game_date=eq.${day}&select=member_id,member_name,player_name,team,opponent,did_not_play,pts,reb,ast,stl,blk,tov,fantasy_points&order=fantasy_points.desc`);
+    S.dayCache[day] = await apiAll(`member_player_games?game_date=eq.${day}&select=member_id,member_name,player_name,team,opponent,did_not_play,team_won,pts,reb,ast,stl,blk,tov,fantasy_points&order=fantasy_points.desc`);
   }
   const rows = S.dayCache[day];
   $("boxes").innerHTML = S.leaderboard.map((m) => {
@@ -503,7 +504,7 @@ async function renderDaily() {
       <thead><tr><th>球員</th><th class="r">分</th><th class="r">板</th><th class="r">助</th><th class="r">抄</th><th class="r">阻</th><th class="r">失</th><th class="r">FP</th></tr></thead>
       <tbody>${mine.map((p) => p.did_not_play
         ? `<tr class="dnp"><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span></td><td colspan="6">未上場</td><td class="r fp num">0.0</td></tr>`
-        : `<tr><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span></td>
+        : `<tr><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span>${wl(p.team_won)}</td>
             <td class="r num">${p.pts}</td><td class="r num">${p.reb}</td><td class="r num">${p.ast}</td>
             <td class="r num">${p.stl}</td><td class="r num">${p.blk}</td><td class="r num">${p.tov}</td>
             <td class="r fp num">${fmt(p.fantasy_points)}</td></tr>`).join("")}</tbody></table></div>`
@@ -514,7 +515,7 @@ async function renderDaily() {
 
 function renderRules() {
   const names = { pts: "得分", reb: "籃板", oreb: "進攻籃板", dreb: "防守籃板", ast: "助攻", stl: "抄截", blk: "阻攻", tov: "失誤", pf: "犯規",
-    fgm: "投籃命中", fga: "投籃出手", fg3m: "三分命中", fg3a: "三分出手", ftm: "罰球命中", fta: "罰球出手", plus_minus: "正負值", double_double: "大兩雙", triple_double: "大三元" };
+    fgm: "投籃命中", fga: "投籃出手", fg3m: "三分命中", fg3a: "三分出手", ftm: "罰球命中", fta: "罰球出手", plus_minus: "正負值", double_double: "大兩雙", triple_double: "大三元", team_win: "球隊贏球", team_loss: "球隊輸球" };
   $("rules").innerHTML = S.rules.filter((r) => +r.weight !== 0)
     .map((r) => `<span>${esc(names[r.stat] ?? r.stat)} <b>${+r.weight > 0 ? "+" : ""}${+r.weight}</b></span>`).join("");
 }
