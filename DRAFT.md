@@ -4,7 +4,7 @@
 > 賽季中的計分、遞補、揮棄、交易規則請看 [RULES.md](RULES.md)。
 >
 > **2K 能力值查詢**
-> - 全部球員（依球隊）：https://www.2kratings.com/current-teams
+> - 全部球員 Overall 排名（第 1 名到最後一名，可搜尋、篩選位置與球隊）：https://www.nba2klab.com/nba2k-player-ratings
 > - 2K 官方前 100 名：https://nba.2k.com/zh-TW/2k27/top-100-ratings/
 > - 聯盟網站的自由球員名單（含能力值，可搜尋）：https://dennisy33.github.io/nba-fantasy/#team
 
@@ -28,7 +28,7 @@
 
 ### 能力值（NBA 2K27，選秀當天鎖定）
 
-能力值來源是 [2kratings.com](https://www.2kratings.com)，選秀當天由管理員更新一次後**鎖定整季**，賽季中 2K 調整數值不影響聯盟。
+能力值以 NBA 2K27 的 Overall 為準，查詢請看 [NBA 2K Lab 球員能力值](https://www.nba2klab.com/nba2k-player-ratings)，選秀當天由管理員更新一次後**鎖定整季**，賽季中 2K 調整數值不影響聯盟。
 
 | 級距 | 每隊名額 | 全聯盟人數（11/2） |
 |---|---|---|

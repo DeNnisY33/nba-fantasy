@@ -13,7 +13,7 @@
 | 每隊陣容 | 12 名球員：**十人名單**（算分）＋ **名單外 2 人** |
 | 計分期間 | ⚠️ 待確認：開始計分日期 |
 | 日期基準 | 一律使用**美東時間**的比賽日（台灣、日本早上打的比賽，算在美國的前一天） |
-| 能力值 | NBA 2K27（[2kratings.com](https://www.2kratings.com)），**選秀當天鎖定整季** |
+| 能力值 | NBA 2K27 Overall（[NBA 2K Lab 查詢](https://www.nba2klab.com/nba2k-player-ratings)），**選秀當天鎖定整季** |
 
 ---
 
