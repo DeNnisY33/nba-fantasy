@@ -1,4 +1,4 @@
-# NBA 六人 Fantasy 聯盟
+# 看比賽囉：NBA 六人 Fantasy 聯盟
 
 網址：https://dennisy33.github.io/nba-fantasy/
 
