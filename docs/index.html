@@ -257,7 +257,7 @@ footer .rules b { color: var(--ink); font-family: var(--font-display); font-size
   <!-- 球隊 -->
   <section class="view" id="v-team" hidden>
     <div>
-      <h2>聯盟傷兵 <span class="sub">名單中的受傷球員，每 2 小時更新</span></h2>
+      <h2>聯盟傷兵 <span class="sub">每 2 小時更新；缺陣、禁賽的十人名單球員會自動由名單外遞補</span></h2>
       <div class="panel panel-pad"><div class="inj-list" id="inj-league"></div></div>
     </div>
     <div>
@@ -265,25 +265,27 @@ footer .rules b { color: var(--ink); font-family: var(--font-display); font-size
         <h2 style="margin:0">球隊陣容</h2>
         <select class="inp" id="team-select" aria-label="選擇球隊"></select>
       </div>
+      <div id="team-caps" class="form-row" style="font-size:13px;margin-bottom:8px"></div>
       <div id="team-note" class="muted" style="font-size:13px;margin-bottom:10px"></div>
       <div class="panel table-scroll" style="margin-bottom:14px">
         <table>
-          <thead><tr><th>先發（算分）</th><th class="r">場均 FP</th><th class="r hide-sm">場數</th><th>狀態</th><th></th></tr></thead>
+          <thead><tr><th>十人名單（算分）</th><th class="r">2K</th><th class="r">場均 FP</th><th class="r hide-sm">場數</th><th>狀態</th></tr></thead>
           <tbody id="roster-active"></tbody>
         </table>
       </div>
       <div class="panel table-scroll">
         <table>
-          <thead><tr><th>替補</th><th class="r">場均 FP</th><th class="r hide-sm">場數</th><th>狀態</th><th></th></tr></thead>
+          <thead><tr><th>十人名單外</th><th class="r">2K</th><th class="r">場均 FP</th><th class="r hide-sm">場數</th><th>狀態</th></tr></thead>
           <tbody id="roster-bench"></tbody>
         </table>
       </div>
     </div>
+    <div id="waive-box"></div>
     <div>
-      <h2>換人紀錄</h2>
+      <h2>揮棄紀錄</h2>
       <div class="panel table-scroll">
         <table>
-          <thead><tr><th>生效日</th><th>換下</th><th>換上</th><th>原因</th></tr></thead>
+          <thead><tr><th>生效日</th><th>隊伍</th><th>放掉</th><th>撿進</th></tr></thead>
           <tbody id="changes"></tbody>
         </table>
       </div>
@@ -304,7 +306,7 @@ footer .rules b { color: var(--ink); font-family: var(--font-display); font-size
   </section>
 
   <footer>
-    <div>日期為美東比賽日。比賽數據每天下午更新一次；換人與交易都是隔天生效。分數依下列規則計算：</div>
+    <div>日期為美東比賽日。比賽數據每天下午更新一次；揮棄（由管理員處理）與交易都是隔天生效；十人名單內缺陣時自動由名單外遞補。分數依下列規則計算：</div>
     <div class="rules" id="rules"></div>
   </footer>
 </div>
@@ -416,11 +418,12 @@ async function loadCore() {
   $("meta").textContent = `最新比賽日 ${lb[0]?.latest_day ?? "—"} · 數據更新於 ${upd}`;
 }
 async function loadTeams() {
-  const [rosters, changes] = await Promise.all([
-    api("team_rosters?select=*&order=member_id,slot,avg_fp.desc.nullslast"),
-    api("lineup_changes?select=*&order=created_at.desc&limit=200"),
+  const [rosters, changes, freeAgents] = await Promise.all([
+    api("team_rosters?select=*&order=member_id,slot,ovr.desc.nullslast"),
+    api("waivers?select=*&order=created_at.desc&limit=200"),
+    apiAll("free_agents?select=*&order=ovr.desc.nullslast,avg_fp.desc.nullslast"),
   ]);
-  Object.assign(S, { rosters, changes });
+  Object.assign(S, { rosters, changes, freeAgents });
 }
 async function loadTrades() {
   const [trades, items, votes] = await Promise.all([
@@ -494,7 +497,7 @@ async function renderDaily() {
   if (!day) { $("boxes").innerHTML = `<div class="empty">還沒有比賽數據。</div>`; return; }
   if (!S.dayCache[day]) {
     $("boxes").innerHTML = `<div class="empty">載入 ${day}…</div>`;
-    S.dayCache[day] = await apiAll(`member_player_games?game_date=eq.${day}&select=member_id,member_name,player_name,team,opponent,did_not_play,team_won,pts,reb,ast,stl,blk,tov,fantasy_points&order=fantasy_points.desc`);
+    S.dayCache[day] = await apiAll(`member_player_games?game_date=eq.${day}&select=member_id,member_name,player_name,team,opponent,did_not_play,team_won,is_sub,pts,reb,ast,stl,blk,tov,fantasy_points&order=fantasy_points.desc`);
   }
   const rows = S.dayCache[day];
   $("boxes").innerHTML = S.leaderboard.map((m) => {
@@ -504,7 +507,7 @@ async function renderDaily() {
       <thead><tr><th>球員</th><th class="r">分</th><th class="r">板</th><th class="r">助</th><th class="r">抄</th><th class="r">阻</th><th class="r">失</th><th class="r">FP</th></tr></thead>
       <tbody>${mine.map((p) => p.did_not_play
         ? `<tr class="dnp"><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span></td><td colspan="6">未上場</td><td class="r fp num">0.0</td></tr>`
-        : `<tr><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span>${wl(p.team_won)}</td>
+        : `<tr><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span>${wl(p.team_won)}${p.is_sub ? ` <span class="chip next" style="font-size:11px;padding:0 5px">遞補</span>` : ""}</td>
             <td class="r num">${p.pts}</td><td class="r num">${p.reb}</td><td class="r num">${p.ast}</td>
             <td class="r num">${p.stl}</td><td class="r num">${p.blk}</td><td class="r num">${p.tov}</td>
             <td class="r fp num">${fmt(p.fantasy_points)}</td></tr>`).join("")}</tbody></table></div>`
@@ -584,21 +587,33 @@ async function renderCharts() {
 }
 
 // ---------- 球隊與傷兵 ----------
+const OUT_STATUSES = ["Out", "Suspension"];
 function injChip(p) {
   if (!p.injury_status) return `<span class="chip ok">健康</span>`;
   const cls = p.injury_status === "Out" ? "out" : p.injury_status === "Suspension" ? "susp" : "dtd";
   const label = { "Out": "缺陣", "Day-To-Day": "每日觀察", "Suspension": "禁賽" }[p.injury_status] ?? p.injury_status;
   return `<span class="chip ${cls}" title="${esc(p.injury_comment || "")}">${label}${p.injury_type ? "・" + esc(p.injury_type) : ""}</span>`;
 }
+function ovrChip(ovr) {
+  if (ovr == null) return `<span class="muted">—</span>`;
+  const bg = ovr >= 90 ? "var(--accent)" : ovr >= 85 ? "var(--court)" : ovr >= 80 ? "var(--good)" : "var(--chip)";
+  const fg = ovr >= 80 ? "var(--surface)" : "var(--muted)";
+  return `<span class="num" style="display:inline-block;min-width:30px;text-align:center;padding:1px 4px;font-weight:700;font-size:15px;background:${bg};color:${fg}">${ovr}</span>`;
+}
+const setting = (k, d) => S.settings[k] ?? d;
+function capCounts(players) {
+  const o = players.map((p) => p.ovr ?? 0);
+  return { n90: o.filter((x) => x >= 90).length, n85: o.filter((x) => x >= 85).length, n80: o.filter((x) => x >= 80).length };
+}
 
-let teamSel = null, swapOpen = null;
+let teamSel = null, faQuery = "";
 function renderTeam() {
-  // 聯盟傷兵
   const hurt = S.rosters.filter((p) => p.injury_status);
   $("inj-league").innerHTML = hurt.length ? hurt.sort((a, b) => a.member_id - b.member_id).map((p) => `
     <div class="inj-item">
       <div>${injChip(p)}</div>
-      <div><b>${esc(p.player_name)}</b> <span class="tm">${esc(p.team || "")}</span> · <span class="dot" style="background:${color(p.member_id)};margin-right:4px"></span>${esc(p.member_name)}・${p.slot === "active" ? "<b>先發</b>" : "替補"}
+      <div><b>${esc(p.player_name)}</b> <span class="tm">${esc(p.team || "")}</span> · <span class="dot" style="background:${color(p.member_id)};margin-right:4px"></span>${esc(p.member_name)}・${p.slot === "active" ? "<b>十人名單內</b>" : "名單外"}
+        ${OUT_STATUSES.includes(p.injury_status) && p.slot === "active" ? `<span class="chip next" style="margin-left:4px">自動遞補</span>` : ""}
         ${p.return_date ? `<span class="muted">・預計 ${md(p.return_date)} 回歸</span>` : ""}
         ${p.injury_comment ? `<div class="muted" style="font-size:12px">${esc(p.injury_comment)}</div>` : ""}</div>
     </div>`).join("") : `<div class="muted" style="font-size:13px">目前各隊都沒有傷兵。</div>`;
@@ -609,64 +624,71 @@ function renderTeam() {
   const mine = AUTH && AUTH.member_id === teamSel;
   const team = S.rosters.filter((p) => p.member_id === teamSel);
   const active = team.filter((p) => p.slot === "active"), bench = team.filter((p) => p.slot === "bench");
-  const hurtStarters = active.filter((p) => p.injury_status);
-  const returning = bench.filter((p) => p.injury_benched && !p.injury_status);
+  const outList = active.filter((p) => OUT_STATUSES.includes(p.injury_status));
+  const healthyBench = bench.filter((p) => !OUT_STATUSES.includes(p.injury_status)).sort((a, b) => (b.ovr ?? 0) - (a.ovr ?? 0));
+  const subs = new Set(healthyBench.slice(0, outList.length).map((p) => p.player_id));
+  const injuredCount = team.filter((p) => OUT_STATUSES.includes(p.injury_status)).length;
+  const needInj = +setting("waive_injured_needed", 3);
 
-  $("team-note").innerHTML = mine
-    ? (hurtStarters.length ? `你有 <b>${hurtStarters.length}</b> 位先發受傷，可以點「換下」跟替補互換，明天生效。`
-       : returning.length ? `因傷下場的 <b>${esc(returning.map((p) => p.player_name).join("、"))}</b> 已經康復，可以換回先發。`
-       : `先發都健康。只有先發受傷時才能跟替補互換。`)
-    : (AUTH ? `正在看 ${esc(nameOf(teamSel))} 的球隊。` : `登入後可以管理自己的球隊。`);
+  const c = capCounts(team);
+  const cap = (label, n, max) => `<span class="chip ${n > max ? "out" : ""}" style="font-size:12px">${label} ${n}/${max}</span>`;
+  $("team-caps").innerHTML = `<span class="muted">能力值上限</span>${cap("90+", c.n90, +setting("cap_90", 2))}${cap("85+", c.n85, +setting("cap_85", 5))}${cap("80+", c.n80, +setting("cap_80", 8))}
+    <span class="muted" style="margin-left:8px">缺陣 / 禁賽 ${injuredCount} 人</span>`;
+
+  $("team-note").innerHTML = (outList.length
+      ? `十人名單內有 <b>${outList.length}</b> 位缺陣，目前由 <b>${esc([...subs].map((id) => team.find((p) => p.player_id === id)?.player_name).join("、") || "（名單外沒有健康球員）")}</b> 自動遞補。`
+      : `十人名單都可以上場，名單外的球員不算分。`)
+    + (injuredCount >= needInj ? `　隊上有 ${injuredCount} 位缺陣 / 禁賽，<b>符合揮棄條件</b>，請跟管理員說要放掉誰、撿誰。` : `　缺陣 / 禁賽達 ${needInj} 人才能揮棄。`);
 
   const row = (p) => {
-    const pending = p.today_slot && p.today_slot !== p.slot ? `<span class="chip next">明天起${p.slot === "active" ? "先發" : "替補"}</span>`
-                  : !p.today_slot ? `<span class="chip next">明天加入</span>` : "";
-    let act = "";
-    if (mine) {
-      const canOut = p.slot === "active" && p.injury_status && bench.length;
-      const canBack = p.slot === "bench" && p.injury_benched && !p.injury_status;
-      if (swapOpen === p.player_id) {
-        const opts = (p.slot === "active" ? bench : active).map((o) => `<option value="${esc(o.player_id)}">${esc(o.player_name)}${o.injury_status ? "（傷）" : ""}</option>`).join("");
-        act = `<div class="swap-box"><select class="inp" id="swap-with" aria-label="交換對象">${opts}</select>
-          <button class="btn sm go" type="button" data-swap="${esc(p.player_id)}" data-slot="${p.slot}">確認</button>
-          <button class="btn sm" type="button" data-swap-cancel>取消</button></div>`;
-      } else if (canOut) act = `<button class="btn sm" type="button" data-swap-open="${esc(p.player_id)}">換下</button>`;
-      else if (canBack) act = `<button class="btn sm" type="button" data-swap-open="${esc(p.player_id)}">換回先發</button>`;
-    }
-    return `<tr class="${p.injury_status && p.slot === "active" ? "hurt" : ""}">
+    const tag = !p.today_slot ? `<span class="chip next">明天加入</span>`
+              : subs.has(p.player_id) ? `<span class="chip next">遞補中</span>`
+              : (p.slot === "active" && OUT_STATUSES.includes(p.injury_status)) ? `<span class="chip next">由名單外遞補</span>` : "";
+    return `<tr class="${p.slot === "active" && OUT_STATUSES.includes(p.injury_status) ? "hurt" : ""}">
       <td><div class="pl"><img src="${esc(p.headshot || "")}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
-        <div><div class="nm">${esc(p.player_name)}</div><div class="meta">${esc(p.team || "—")} · ${esc(p.position || "—")} ${pending}</div></div></div></td>
+        <div><div class="nm">${esc(p.player_name)}</div><div class="meta">${esc(p.team || "—")} · ${esc(p.position || "—")}${p.pos_2k ? ` (${esc(p.pos_2k)})` : ""} ${tag}</div></div></div></td>
+      <td class="r">${ovrChip(p.ovr)}</td>
       <td class="r big num">${p.avg_fp != null ? fmt(p.avg_fp) : "—"}</td>
       <td class="r num hide-sm">${p.games}</td>
-      <td>${injChip(p)}${p.return_date && p.injury_status ? `<div class="tm">預計 ${md(p.return_date)}</div>` : ""}</td>
-      <td class="r">${act}</td></tr>`;
+      <td>${injChip(p)}${p.return_date && p.injury_status ? `<div class="tm">預計 ${md(p.return_date)}</div>` : ""}</td></tr>`;
   };
-  $("roster-active").innerHTML = active.map(row).join("") || `<tr><td colspan="5" class="empty">還沒有先發球員</td></tr>`;
-  $("roster-bench").innerHTML = bench.map(row).join("") || `<tr><td colspan="5" class="empty">沒有替補</td></tr>`;
+  $("roster-active").innerHTML = active.map(row).join("") || `<tr><td colspan="5" class="empty">十人名單是空的</td></tr>`;
+  $("roster-bench").innerHTML = bench.map(row).join("") || `<tr><td colspan="5" class="empty">沒有名單外球員</td></tr>`;
 
-  const ch = S.changes.filter((c) => c.member_id === teamSel);
-  $("changes").innerHTML = ch.map((c) => `<tr><td class="num">${c.effective_date}</td><td>${esc(c.out_player)}</td><td>${esc(c.in_player)}</td>
-    <td>${c.reason === "injury" ? "先發受傷" : "傷癒回歸"}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">還沒有換人紀錄</td></tr>`;
+  renderFreeAgents();
+
+  $("changes").innerHTML = S.changes.map((w) => `<tr><td class="num">${w.effective_date}</td>
+    <td><span class="dot" style="background:${color(w.member_id)}"></span>${esc(nameOf(w.member_id))}</td>
+    <td>${esc(w.drop_player)} ${ovrChip(w.drop_ovr)}</td><td>${esc(w.add_player)} ${ovrChip(w.add_ovr)}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="empty">還沒有揮棄紀錄</td></tr>`;
 }
 
-document.addEventListener("click", async (e) => {
-  const t = e.target.closest("button"); if (!t) return;
-  if (t.dataset.swapOpen) { swapOpen = t.dataset.swapOpen; renderTeam(); return; }
-  if (t.hasAttribute("data-swap-cancel")) { swapOpen = null; renderTeam(); return; }
-  if (t.dataset.swap) {
-    const other = $("swap-with").value;
-    const [outP, inP] = t.dataset.slot === "active" ? [t.dataset.swap, other] : [other, t.dataset.swap];
-    t.disabled = true;
-    const r = await rpc("swap_players", { ...authArgs(), p_out_player: outP, p_in_player: inP });
-    if (!r.ok) { toast(r.error); t.disabled = false; return; }
-    swapOpen = null; await loadTeams(); renderTeam(); toast(`已換人，${md(r.effective_date)} 起生效`);
-  }
-});
+function renderFreeAgents() {
+  const box = $("waive-box");
+  const gap = +setting("waive_rating_gap", 5);
+  const q = faQuery.trim().toLowerCase();
+  const fas = S.freeAgents.filter((f) => !q || f.name.toLowerCase().includes(q) || (f.team || "").toLowerCase() === q);
+  const shown = fas.slice(0, 60);
+  box.innerHTML = `<h2>自由球員 <span class="sub">揮棄由管理員處理：傷兵 ${setting("waive_injured_needed", 3)} 人以上時，可以放掉任一位、撿能力值低 ${gap} 以上的自由球員，隔天生效</span></h2>
+    <div class="panel panel-pad" style="display:grid;gap:12px">
+      <div class="form-row"><input class="inp" id="fa-q" placeholder="搜尋球員名字或球隊代號（例如 LAL）" value="${esc(faQuery)}" style="flex:1;min-width:200px">
+        <span class="muted" style="font-size:13px">${fas.length} 位${fas.length > shown.length ? `，顯示前 ${shown.length} 位` : ""}</span></div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>球員</th><th class="r">2K</th><th class="r">場均 FP</th><th>狀態</th></tr></thead>
+        <tbody>${shown.map((f) => `<tr>
+          <td><div class="pl"><img src="${esc(f.headshot || "")}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+            <div><div class="nm">${esc(f.name)}</div><div class="meta">${esc(f.team || "—")} · ${esc(f.position || "—")}${f.pos_2k ? ` (${esc(f.pos_2k)})` : ""}</div></div></div></td>
+          <td class="r">${ovrChip(f.ovr)}</td><td class="r num">${f.avg_fp != null ? fmt(f.avg_fp) : "—"}</td>
+          <td>${injChip(f)}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">沒有符合條件的自由球員</td></tr>`}</tbody>
+      </table></div>
+    </div>`;
+  $("fa-q").oninput = (e) => { faQuery = e.target.value; const pos = e.target.selectionStart; renderFreeAgents(); const el = $("fa-q"); el.focus(); el.setSelectionRange(pos, pos); };
+}
 
 // ---------- 交易區 ----------
 const needed = () => +(S.settings.trade_approvals_needed ?? 2);
 let tradeTo = null, giveSel = [], getSel = [];
-const STATUS = { pending: "等待對方回覆", voting: "投票中", approved: "已成交", rejected: "投票否決", declined: "對方拒絕", cancelled: "已取消", failed: "失效（球員已不在隊上）" };
+const STATUS = { pending: "等待對方回覆", voting: "投票中", approved: "已成交", rejected: "投票否決", declined: "對方拒絕", cancelled: "已取消", failed: "失效（球員已不在隊上，或不再符合限制）" };
 
 function renderTradeForm() {
   const box = $("trade-new");
@@ -678,8 +700,8 @@ function renderTradeForm() {
   const list = (ps, sel, key) => ps.map((p) => {
     const ord = sel.indexOf(p.player_id);
     return `<label><input type="checkbox" data-pick="${key}" value="${esc(p.player_id)}" ${ord >= 0 ? "checked" : ""}>
-      <span>${ord >= 0 ? `<span class="ord">${ord + 1}</span> ` : ""}<b>${esc(p.player_name)}</b> <span class="tm">${esc(p.team || "")} · ${p.slot === "active" ? "先發" : "替補"}</span> ${p.injury_status ? injChip(p) : ""}</span>
-      <span class="num muted">${p.avg_fp != null ? fmt(p.avg_fp) : "—"}</span></label>`;
+      <span>${ord >= 0 ? `<span class="ord">${ord + 1}</span> ` : ""}<b>${esc(p.player_name)}</b> <span class="tm">${esc(p.team || "")} · ${esc(p.position || "?")} · ${p.slot === "active" ? "名單內" : "名單外"}</span> ${p.injury_status ? injChip(p) : ""}</span>
+      <span>${ovrChip(p.ovr)}</span></label>`;
   }).join("");
   const pairs = Array.from({ length: Math.max(giveSel.length, getSel.length) }, (_, i) => {
     const a = mine.find((p) => p.player_id === giveSel[i]), b = theirs.find((p) => p.player_id === getSel[i]);
@@ -689,7 +711,7 @@ function renderTradeForm() {
   box.innerHTML = `<h2>發起交易 <span class="sub">對方同意後，由其他 ${S.members.length - 2} 人投票，${needed()} 票同意就成交</span></h2>
     <div class="panel panel-pad" style="display:grid;gap:14px">
       <div class="form-row"><span>交易對象</span><select class="inp" id="trade-to">${others.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select>
-        <span class="muted" style="font-size:13px">依勾選順序配對，換過去的球員接手對方原本的先發或替補位置</span></div>
+        <span class="muted" style="font-size:13px">依勾選順序配對，換過去的球員接手對方原本的位置；十人名單內的球員只能換同位置（G/F/C），交易後雙方都要符合能力值上限</span></div>
       <div class="picker">
         <div><div class="muted" style="font-size:13px;margin-bottom:4px">我送出</div><div class="pick-list panel">${list(mine, giveSel, "give")}</div></div>
         <div><div class="muted" style="font-size:13px;margin-bottom:4px">我想要（${esc(nameOf(tradeTo))}）</div><div class="pick-list panel">${list(theirs, getSel, "get")}</div></div>
@@ -792,8 +814,8 @@ function renderAll() {
   if (v === "trades") renderTrades();
   updateBadge();
 }
-window.addEventListener("hashchange", () => { swapOpen = null; renderAll(); });
-$("team-select").onchange = (e) => { teamSel = +e.target.value; swapOpen = null; renderTeam(); };
+window.addEventListener("hashchange", () => { renderAll(); });
+$("team-select").onchange = (e) => { teamSel = +e.target.value; renderTeam(); };
 $("wk-select").onchange = (e) => { weekIdx = +e.target.value; renderWeekly(); };
 $("wk-prev").onclick = () => { weekIdx--; renderWeekly(); };
 $("wk-next").onclick = () => { weekIdx++; renderWeekly(); };

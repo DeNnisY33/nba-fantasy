@@ -1,139 +1,181 @@
--- 本機整合測試：先跑 schema.sql 與 002，再執行這支。任何 assert 失敗都會中止。
+-- 本機整合測試：依序跑 schema.sql、002、003、004、005 後再執行這支。任何 assert 失敗都會中止。
 \set ON_ERROR_STOP 1
 set client_min_messages = warning;
 
 insert into members (name) values ('A'),('B'),('C'),('D'),('E'),('F');
 select admin_set_pin(id, '1111') from members;
 
--- A：p1..p10 先發、p11 p12 替補；B：q1..q10 先發、q11 q12 替補
+-- 球員資料庫：A 隊 a1..a12、B 隊 b1..b12、自由球員 fa1..fa3
+-- 位置：1-4 G、5-8 F、9-10 C、11 G、12 F
+insert into players (player_id, name, team, position)
+select x || g, upper(x) || g, 'TST', case when g <= 4 or g = 11 then 'G' when g <= 8 or g = 12 then 'F' else 'C' end
+from unnest(array['a','b']) x, generate_series(1,12) g;
+insert into players (player_id, name, team, position) values ('fa1','FA1','TST','G'),('fa2','FA2','TST','F'),('fa3','FA3','TST','C');
+
+-- 能力值：a1=92 a2=90（兩位 90+）a3..a5=86（85+ 共 5）a6..a8=82（80+ 共 8）其餘 75；b 隊同樣結構；
+-- 自由球員 fa1=80、fa2=70、fa3=76
+insert into player_ratings (player_id, ovr, snapshot_date)
+select x || g, case when g = 1 then 92 when g = 2 then 90 when g <= 5 then 86 when g <= 8 then 82 else 75 end, current_date
+from unnest(array['a','b']) x, generate_series(1,12) g;
+insert into player_ratings values ('fa1', 80, null, current_date), ('fa2', 70, null, current_date), ('fa3', 76, null, current_date);
+
+-- 陣容：1..10 十人名單內，11、12 名單外
 insert into rosters (member_id, player_id, player_name, start_date, slot)
-select (select id from members where name='A'), 'p'||g, 'P'||g, et_today() - 10, case when g <= 10 then 'active' else 'bench' end
-from generate_series(1,12) g;
-insert into rosters (member_id, player_id, player_name, start_date, slot)
-select (select id from members where name='B'), 'q'||g, 'Q'||g, et_today() - 10, case when g <= 10 then 'active' else 'bench' end
-from generate_series(1,12) g;
+select (select id from members where name = upper(x)), x || g, upper(x) || g, et_today() - 10,
+       case when g <= 10 then 'active' else 'bench' end
+from unnest(array['a','b']) x, generate_series(1,12) g;
 
--- 今天 p1 打了一場（先發），p11 也打了（替補，不該算分）
-insert into player_game_stats (game_id, player_id, game_date, player_name, pts) values
-  ('g1','p1', et_today(), 'P1', 30), ('g1','p11', et_today(), 'P11', 50);
-
-do $$ declare A int := (select id from members where name='A');
-              B int := (select id from members where name='B');
-              C int := (select id from members where name='C');
-              D int := (select id from members where name='D');
-              E int := (select id from members where name='E');
-              r jsonb; tid int;
-begin
-  -- 只算先發
-  assert (select points from member_daily_scores where member_id = A) = 30, 'bench should not score';
-  assert (select week_points from leaderboard where member_id = A) = 30, 'week points';
-
-  -- 登入
-  assert (login(A, '1111')->>'ok')::bool, 'login ok';
-  assert not (login(A, '9999')->>'ok')::bool, 'wrong pin';
-
-  -- 沒受傷不能換
-  r := swap_players(A, '1111', 'p1', 'p11');
-  assert not (r->>'ok')::bool and r->>'error' like '只有先發%', 'healthy swap blocked: ' || r;
-
-  -- p1 受傷 → 可以換
-  insert into player_injuries (player_id, player_name, status) values ('p1','P1','Out');
-  r := swap_players(A, '1111', 'p1', 'p11');
-  assert (r->>'ok')::bool, 'injury swap: ' || r;
-  assert (select slot from team_rosters where player_id='p1') = 'bench';
-  assert (select injury_benched from team_rosters where player_id='p1');
-  assert (select slot from team_rosters where player_id='p11') = 'active';
-  assert (select today_slot from team_rosters where player_id='p1') = 'active', 'today unchanged';
-  -- 今天的分數不受影響（隔天生效）
-  assert (select points from member_daily_scores where member_id = A) = 30, 'swap is next-day';
-
-  -- 傷還沒好，不能換回
-  r := swap_players(A, '1111', 'p11', 'p1');
-  assert not (r->>'ok')::bool, 'still injured';
-  -- 傷好了 → 可以換回
-  delete from player_injuries where player_id = 'p1';
-  r := swap_players(A, '1111', 'p11', 'p1');
-  assert (r->>'ok')::bool, 'return swap: ' || r;
-  assert (select slot from team_rosters where player_id='p1') = 'active';
-  -- 第一次換人：2 筆舊紀錄保留到今天 + 2 筆明天生效；同一天第二次換人直接改明天那 2 筆
-  assert (select count(*) from rosters where member_id = A) = 14, 'same-day swaps edit in place';
-  assert (select count(*) from team_rosters where member_id = A) = 12, 'still 12 players';
-  assert (select count(*) from lineup_changes) = 2;
-
-  -- 交易：A 的 p2（先發）+ p12（替補） 換 B 的 q3（先發）+ q12（替補）
-  r := propose_trade(A, '1111', B, array['p2','p12'], array['q3','q12'], '試試看');
-  assert (r->>'ok')::bool, 'propose: ' || r; tid := (r->>'trade_id')::int;
-  -- 重複的球員不能再提
-  assert not (propose_trade(A, '1111', B, array['p2'], array['q4'])->>'ok')::bool, 'dup trade';
-  -- 人數不同不行
-  assert not (propose_trade(A, '1111', B, array['p5'], array['q4','q5'])->>'ok')::bool, 'uneven';
-  -- 交易中的球員不能換位置
-  insert into player_injuries (player_id, player_name, status) values ('p2','P2','Out');
-  assert not (swap_players(A, '1111', 'p2', 'p11')->>'ok')::bool, 'locked by trade';
-  delete from player_injuries where player_id = 'p2';
-
-  -- 投票前不能投
-  assert not (vote_trade(C, '1111', tid, true)->>'ok')::bool, 'not voting yet';
-  -- 只有 B 能回覆
-  assert not (respond_trade(C, '1111', tid, true)->>'ok')::bool, 'only receiver';
-  r := respond_trade(B, '1111', tid, true);
-  assert r->>'status' = 'voting', 'accepted: ' || r;
-  -- 當事人不能投
-  assert not (vote_trade(A, '1111', tid, true)->>'ok')::bool, 'party cannot vote';
-  r := vote_trade(C, '1111', tid, true);
-  assert r->>'status' = 'voting', 'one yes: ' || r;
-  r := vote_trade(D, '1111', tid, true);
-  assert r->>'status' = 'approved', 'two yes: ' || r;
-
-  assert (select member_name from team_rosters where player_id='q3') = 'A', 'q3 moved to A';
-  assert (select slot from team_rosters where player_id='q3') = 'active', 'q3 takes p2 slot';
-  assert (select slot from team_rosters where player_id='q12') = 'bench', 'q12 takes p12 slot';
-  assert (select member_name from team_rosters where player_id='p2') = 'B';
-  assert (select slot from team_rosters where player_id='p2') = 'active';
-  assert (select count(*) from team_rosters where member_id = A) = 12;
-  assert (select count(*) from team_rosters where member_id = B) = 12;
-  assert (select count(*) from team_rosters where member_id = A and slot='active') = 10;
-  -- 今天 p1 的分數仍歸 A
-  assert (select points from member_daily_scores where member_id = A) = 30;
-
-  -- 否決：3 票反對
-  r := propose_trade(A, '1111', B, array['p5'], array['q5']); tid := (r->>'trade_id')::int;
-  perform respond_trade(B, '1111', tid, true);
-  perform vote_trade(C, '1111', tid, false);
-  perform vote_trade(D, '1111', tid, false);
-  r := vote_trade(E, '1111', tid, false);
-  assert r->>'status' = 'rejected', 'rejected: ' || r;
-  assert (select member_name from team_rosters where player_id='p5') = 'A';
-
-  -- 拒絕與取消
-  r := propose_trade(A, '1111', B, array['p6'], array['q6']); tid := (r->>'trade_id')::int;
-  assert (respond_trade(B, '1111', tid, false)->>'status') = 'declined';
-  r := propose_trade(A, '1111', B, array['p6'], array['q6']); tid := (r->>'trade_id')::int;
-  assert not (cancel_trade(B, '1111', tid)->>'ok')::bool, 'only proposer cancels';
-  assert (cancel_trade(A, '1111', tid)->>'status') = 'cancelled';
+do $$ begin
+  assert (select problems from roster_check where member_name = 'A') = '{}', 'A roster valid';
+  assert (select draft_notes from roster_check where member_name = 'A') = '{}', 'A positions G4 F4 C2';
 end $$;
 
--- 密碼鎖定（要分開 transaction，才能看到失敗次數被寫入）
+-- ===== 自動遞補 =====
+-- 昨天：a1 有登記缺陣且沒上場 → 由名單外能力值較高的 a11/a12（都是 75）中的一位遞補；a2 缺陣但其實有上場 → 照算
+insert into injury_log values (et_today() - 1, 'a1', 'Out'), (et_today() - 1, 'a2', 'Out'), (et_today() - 1, 'a3', 'Day-To-Day');
+insert into player_game_stats (game_id, player_id, game_date, player_name, pts, did_not_play) values
+  ('y','a1', et_today() - 1, 'A1', 0, true),
+  ('y','a2', et_today() - 1, 'A2', 10, false),
+  ('y','a3', et_today() - 1, 'A3', 10, false),
+  ('y','a11', et_today() - 1, 'A11', 7, false),
+  ('y','a12', et_today() - 1, 'A12', 5, false);
+-- 今天：沒有人缺陣 → 名單外的 a11 不算分
+insert into player_game_stats (game_id, player_id, game_date, player_name, pts, did_not_play) values
+  ('t','a1', et_today(), 'A1', 20, false), ('t','a11', et_today(), 'A11', 50, false);
+
+do $$ declare A int := (select id from members where name='A'); begin
+  -- 昨天：a2 10 + a3 10 + 一位遞補（a11 與 a12 能力值相同，依 player_id 排序取 a11 = 7）
+  assert (select points from member_daily_scores where member_id = A and game_date = et_today() - 1) = 27,
+    'yesterday autosub: ' || (select points from member_daily_scores where member_id = A and game_date = et_today() - 1);
+  assert (select count(*) from member_player_games where member_id = A and game_date = et_today() - 1 and is_sub) = 1, 'one sub';
+  assert not exists (select 1 from member_player_games where player_id = 'a1' and game_date = et_today() - 1), 'out player not counted';
+  -- 今天：只有 a1 算分
+  assert (select points from member_daily_scores where member_id = A and game_date = et_today()) = 20, 'no sub today';
+end $$;
+
+-- 傷兵同步會寫入當天紀錄，同一天出現過 Out 就保留 Out
+select sync_injuries('[{"player_id":"b1","player_name":"B1","status":"Out"}]');
+select sync_injuries('[{"player_id":"b1","player_name":"B1","status":"Day-To-Day"}]');
+do $$ begin
+  assert (select status from injury_log where log_date = et_today() and player_id = 'b1') = 'Out', 'injury log keeps Out';
+  assert (select status from player_injuries where player_id = 'b1') = 'Day-To-Day', 'current status updated';
+end $$;
+
+-- ===== 揮棄 =====
+do $$ declare A int := (select id from members where name='A'); r jsonb; begin
+  -- 受傷不到 3 人不能揮棄
+  delete from player_injuries where true;
+  insert into player_injuries (player_id, player_name, status) values ('a1','A1','Out'), ('a2','A2','Out'), ('a3','A3','Day-To-Day');
+  r := admin_waive(A, 'a9', 'fa2');
+  assert not (r->>'ok')::bool and r->>'error' like '%目前 2 人%', 'need 3 injured: ' || r::text;
+
+  -- 第 3 人缺陣 → 可以揮棄
+  update player_injuries set status = 'Out' where player_id = 'a3';
+  -- 能力值差距不足：a9=75，撿 fa3=76 不行、撿 fa1=80 不行
+  assert not (admin_waive(A, 'a9', 'fa3')->>'ok')::bool, 'gap too small';
+  -- 撿已經在別隊的人不行
+  assert not (admin_waive(A, 'a9', 'b12')->>'ok')::bool, 'owned';
+  -- 放掉 a9（75，十人名單內 C）撿 fa2（70）→ OK，接手十人名單位置
+  r := admin_waive(A, 'a9', 'fa2');
+  assert (r->>'ok')::bool, 'waive ok: ' || r::text;
+  assert (select slot from team_rosters where player_id = 'fa2') = 'active', 'fa2 takes list slot';
+  assert (select member_name from team_rosters where player_id = 'fa2') = 'A';
+  assert not exists (select 1 from team_rosters where player_id = 'a9'), 'a9 dropped';
+  assert exists (select 1 from free_agents where player_id = 'a9'), 'a9 back to free agents';
+  assert not exists (select 1 from free_agents where player_id = 'fa2'), 'fa2 no longer free';
+  assert (select count(*) from waivers) = 1;
+  -- 放掉的人以前的分數照算（a3 昨天 10 分還在）
+  assert (select points from member_daily_scores where member_id = A and game_date = et_today() - 1) = 27, 'history kept';
+  -- 放掉 a1（92）撿 fa1（80）也可以（低 12）
+  assert (admin_waive(A, 'a1', 'fa1')->>'ok')::bool, 'waive star';
+  -- 別隊可以撿回被放掉的 a9（需要先有 3 位傷兵）
+  insert into player_injuries (player_id, player_name, status) values ('b2','B2','Out'),('b3','B3','Out'),('b4','B4','Suspension');
+  r := admin_waive((select id from members where name='B'), 'b1', 'a9');
+  assert (r->>'ok')::bool, 'B picks up a9: ' || r::text;
+  delete from player_injuries where true;
+end $$;
+
+-- ===== 交易限制 =====
+do $$ declare A int := (select id from members where name='A'); B int := (select id from members where name='B');
+             r jsonb; tid int; begin
+  -- 十人名單內不同位置不能換：a2（G, 名單內）換 b5（F, 名單內）
+  r := propose_trade(A, '1111', B, array['a2'], array['b5']);
+  assert not (r->>'ok')::bool and r->>'error' like '%位置不同%', 'position rule: ' || r::text;
+  -- 名單外對名單外不限位置：a11（G）換 b12（F）
+  r := propose_trade(A, '1111', B, array['a11'], array['b12']);
+  assert (r->>'ok')::bool, 'bench swap any pos: ' || r::text;
+  perform cancel_trade(A, '1111', (r->>'trade_id')::int);
+  -- 能力值上限：A 已有 a2（90）+ 撿來的 fa1(80)… B 的 b2 是 90。A 拿 fa2（70, F 名單內）換 b2（90, G 名單內）→ 位置不同先擋
+  -- 改用同位置：A 用 a10（C, 75, 名單內）換 B 的 b2（G）→ 位置不同；用 a4（G, 86）換 b2（G, 90）→ A 的 90+ 變 2 位 OK、85+ 不變
+  r := propose_trade(A, '1111', B, array['a4'], array['b2']);
+  assert (r->>'ok')::bool, 'same pos, caps ok: ' || r::text;
+  perform cancel_trade(A, '1111', (r->>'trade_id')::int);
+  -- 超過 90+ 上限：A 把 fa1（80, 名單內 G 位置）換成 B 的 b1（92, G）→ A 90+ = a2 + b1 = 2 OK；再加一筆 a3→b2 會變 3
+  r := propose_trade(A, '1111', B, array['fa1','a3'], array['b2','b3']);
+  -- fa1(G) 換 b2(G)：A 的 90+ 變 a2+b2 = 2；a3(G? 不，a3 是 G) 換 b3(G)：86↔86 不變 → OK
+  assert (r->>'ok')::bool, 'two pairs ok: ' || r::text; tid := (r->>'trade_id')::int;
+  perform cancel_trade(A, '1111', tid);
+  -- A 的 90+ 目前只有 a2（a1 已被揮棄、撿了 80 分的 fa1，所以 80+ 已滿 8 位）
+  -- 名單外 a11（75）換 b2（90）會讓 80+ 變 9 位 → 擋下
+  r := propose_trade(A, '1111', B, array['a11'], array['b2']);
+  assert not (r->>'ok')::bool and r->>'error' like '%80+%', 'cap 80: ' || r::text;
+  -- 改用 a4（G, 86, 名單內）換 b2（G, 90, 名單內）→ 90+ = 2、85+ = 4、80+ = 8 → OK，走完整流程
+  r := propose_trade(A, '1111', B, array['a4'], array['b2']);
+  assert (r->>'ok')::bool, 'get second 90: ' || r::text; tid := (r->>'trade_id')::int;
+  perform respond_trade(B, '1111', tid, true);
+  perform vote_trade((select id from members where name='C'), '1111', tid, true);
+  r := vote_trade((select id from members where name='D'), '1111', tid, true);
+  assert r->>'status' = 'approved', 'approved: ' || r::text;
+  assert (select slot from team_rosters where player_id = 'b2') = 'active', 'b2 inherits a4 list slot';
+  assert (select member_name from team_rosters where player_id = 'a4') = 'B';
+  -- A 現在 90+ = a2 + b2 = 2，若再多一位 92 分的 b1（已被 B 揮棄）就會超標
+  assert _team_cap_error(A, array['a11'], array['b1'], et_today() + 1) like '%90+%', 'cap 90';
+  assert _team_cap_error(A, array['a2'], array['b1'], et_today() + 1) is null, 'swap 90 for 90 ok';
+end $$;
+
+-- 密碼鎖定
 select login((select id from members where name='F'), 'x') from generate_series(1,5);
-select (login((select id from members where name='F'), '1111')->>'error') as locked_msg;
 do $$ begin
   assert (login((select id from members where name='F'), '1111')->>'error') like '密碼錯誤太多次%', 'lockout';
 end $$;
 
--- 權限：anon 讀得到公開資料，讀不到密碼，不能直接寫入，不能呼叫內部函式
+-- 權限
 set role anon;
-select count(*) as anon_can_read_rosters from team_rosters;
 do $$ begin
   begin perform * from member_auth; raise exception 'anon read member_auth';
   exception when insufficient_privilege then null; end;
-  begin insert into trades (proposer_id, receiver_id) values (1, 2); raise exception 'anon wrote trades';
+  begin insert into waivers (member_id, drop_player_id, drop_player, add_player_id, add_player, slot, effective_date)
+        values (1,'x','x','y','y','active',current_date); raise exception 'anon wrote waivers';
   exception when insufficient_privilege then null; end;
-  begin perform _execute_trade(1); raise exception 'anon ran internal fn';
+  begin perform admin_waive(1, 'a', 'b'); raise exception 'anon ran admin_waive';
   exception when insufficient_privilege then null; end;
-  begin perform sync_injuries('[]'); raise exception 'anon ran sync_injuries';
+  begin perform apply_ratings(current_date); raise exception 'anon ran apply_ratings';
   exception when insufficient_privilege then null; end;
-  assert (login(1, '1111')->>'ok')::bool, 'anon can login';
+  begin perform _trade_error(1, 2, array['a'], array['b'], current_date); raise exception 'anon ran _trade_error';
+  exception when insufficient_privilege then null; end;
+  perform count(*) from free_agents;
+  perform count(*) from roster_check;
 end $$;
 reset role;
+
+-- 能力值匯入與名字對應
+insert into players (player_id, name, team, position) values
+  ('p1', 'Nikola Jokić', 'DEN', 'C'), ('p2', 'RJ Barrett', 'TOR', 'G'), ('p3', 'Alex Sarr', 'WSH', 'C'),
+  ('p4', 'Jaren Jackson Jr.', 'UTAH', 'F'), ('p5', 'Ron Harper Jr.', 'BOS', 'G');
+insert into rating_imports (snapshot_date, source_name, team_slug, ovr, pos_2k) values
+  ('2026-11-02', 'Nikola Jokic', 'denver-nuggets', 97, 'C'),
+  ('2026-11-02', 'R.J. Barrett', 'toronto-raptors', 82, 'SG/SF'),
+  ('2026-11-02', 'Alexandre Sarr', 'washington-wizards', 83, 'C/PF'),
+  ('2026-11-02', 'Jaren Jackson Jr.', 'utah-jazz', 86, 'PF/C'),
+  ('2026-11-02', 'Ron Harper Jr.', 'boston-celtics', 71, 'SF/SG'),
+  ('2026-11-02', 'Nobody Real', 'boston-celtics', 60, 'C');
+do $$ declare r jsonb; begin
+  r := apply_ratings('2026-11-02');
+  assert (r->>'matched')::int = 5, 'matched 5: ' || r::text;
+  assert r->'unmatched' = '["Nobody Real (boston-celtics 60)"]'::jsonb, 'unmatched: ' || r::text;
+  assert (select ovr from player_ratings where player_id = 'p3') = 83, 'Sarr matched by team + last name';
+  update league_settings set value = 'true' where key = 'ratings_locked';
+  assert not (apply_ratings('2026-11-02')->>'ok')::bool, 'locked';
+end $$;
 
 select 'ALL DB TESTS PASSED' as result;

@@ -102,6 +102,22 @@ def main():
                    "headshot": "https://a.espncdn.com/i/headshots/nba/players/full/3945274.png"}], pr
     print("parse_injuries / parse_roster: all checks passed")
 
+    # 2kratings 球隊頁：標記結構取自 2026-11-02 的頁面
+    from fetch_stats import parse_2k_team
+    row = lambda name, ovr, pos: (
+        f'<tr data-shot-3pt="92"><td class="counter" data-sort="1">1.</td><td data-sort="x"><div class="entries">'
+        f'<span class="entry-font ml-1"> <a href="#" title="{name}" class="player-name" data-full="{name}" data-short="{name}">{name}</a> </span> <br>'
+        f'<span class="entry-subtext-font crop-subtext-font ml-1"> ' + " <span class=\"entry-slash\">/</span> ".join(
+            f'<a href="/lists/{p}" title="x">X</a>' for p in pos) +
+        f' | <a href="/lists/6-8-height" title="6\'8&quot; Players">6\'8"</a> <span class="optional-info"> | Center Of Attention </span> </span></div></td>'
+        f'<td data-sort="{ovr}"><div class="rating-updated"> <span data-order="{ovr}.00" class="attribute-box">{ovr}</span></div></td></tr>')
+    page = "<table><tbody>" + row("Luka Doncic", 96, ["point-guard", "shooting-guard"]) + \
+        row("C.J. McCollum", 83, ["point-guard", "shooting-guard"]) + row("Day&#8217;Ron Sharpe", 75, ["center"]) + "</tbody></table>"
+    got = parse_2k_team(page, "los-angeles-lakers")
+    assert [(g["source_name"], g["ovr"], g["pos_2k"]) for g in got] == [
+        ("Luka Doncic", 96, "PG/SG"), ("C.J. McCollum", 83, "PG/SG"), ("Day’Ron Sharpe", 75, "C")], got
+    print("parse_2k_team: all checks passed")
+
 
 if __name__ == "__main__":
     main()

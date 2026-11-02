@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -293,6 +294,70 @@ def job_players(args) -> None:
         sb_upsert("players", rows, "player_id")
 
 
+# ---------------------------------------------------------------- 2K 能力值（2kratings.com）
+
+TEAM_SLUGS = {
+    "atlanta-hawks": "ATL", "boston-celtics": "BOS", "brooklyn-nets": "BKN", "charlotte-hornets": "CHA",
+    "chicago-bulls": "CHI", "cleveland-cavaliers": "CLE", "dallas-mavericks": "DAL", "denver-nuggets": "DEN",
+    "detroit-pistons": "DET", "golden-state-warriors": "GS", "houston-rockets": "HOU", "indiana-pacers": "IND",
+    "los-angeles-clippers": "LAC", "los-angeles-lakers": "LAL", "memphis-grizzlies": "MEM", "miami-heat": "MIA",
+    "milwaukee-bucks": "MIL", "minnesota-timberwolves": "MIN", "new-orleans-pelicans": "NO", "new-york-knicks": "NY",
+    "oklahoma-city-thunder": "OKC", "orlando-magic": "ORL", "philadelphia-76ers": "PHI", "phoenix-suns": "PHX",
+    "portland-trail-blazers": "POR", "sacramento-kings": "SAC", "san-antonio-spurs": "SA", "toronto-raptors": "TOR",
+    "utah-jazz": "UTAH", "washington-wizards": "WSH",
+}
+_POS = {"point-guard": "PG", "shooting-guard": "SG", "small-forward": "SF", "power-forward": "PF", "center": "C"}
+
+
+def parse_2k_team(html_text: str, team_slug: str) -> list[dict]:
+    """解析 2kratings.com 球隊頁的球員表格：名字、OVR、2K 位置。"""
+    rows = []
+    for seg in html_text.split("<tr ")[1:]:
+        m_name = re.search(r'class="player-name" data-full="([^"]+)"', seg)
+        m_ovr = re.search(r'<td data-sort="(\d+)">\s*<div class="rating-updated">', seg)
+        if not m_name or not m_ovr:
+            continue
+        sub = seg.split("entry-subtext-font", 1)[-1].split(" | ", 1)[0]
+        pos = [_POS[x] for x in re.findall(r'href="/lists/(point-guard|shooting-guard|small-forward|power-forward|center)"', sub)]
+        rows.append({
+            "source_name": html.unescape(m_name.group(1)).strip(),
+            "team_slug": team_slug,
+            "ovr": int(m_ovr.group(1)),
+            "pos_2k": "/".join(pos[:2]) or None,
+        })
+    return rows
+
+
+def job_ratings(args) -> None:
+    snapshot = datetime.now(ET).date().isoformat()
+    ua = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"}
+    rows: list[dict] = []
+    for slug in TEAM_SLUGS:
+        r = requests.get(f"https://www.2kratings.com/teams/{slug}", headers=ua, timeout=30)
+        r.raise_for_status()
+        team_rows = parse_2k_team(r.text, slug)
+        if not team_rows:
+            raise RuntimeError(f"2kratings {slug}: 0 players parsed (page format changed?)")
+        rows.extend(team_rows)
+        time.sleep(0.5)
+    tiers = {t: sum(1 for x in rows if lo <= x["ovr"] <= hi) for t, lo, hi in
+             [("90+", 90, 99), ("85-89", 85, 89), ("80-84", 80, 84), ("<=79", 0, 79)]}
+    print(f"2K ratings: {len(rows)} players, tiers {tiers}")
+    if args.dry_run:
+        return
+    for r in rows:
+        r["snapshot_date"] = snapshot
+    url, headers = _sb()
+    for i in range(0, len(rows), 500):
+        resp = requests.post(f"{url}/rest/v1/rating_imports", params={"on_conflict": "snapshot_date,source_name,team_slug"},
+                             headers={**headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
+                             data=json.dumps(rows[i:i + 500]), timeout=30)
+        if resp.status_code >= 300:
+            raise RuntimeError(f"rating_imports upsert failed {resp.status_code}: {resp.text[:300]}")
+    result = sb_rpc("apply_ratings", {"p_snapshot": snapshot})
+    print(f"  applied: {json.dumps(result, ensure_ascii=False)}")
+
+
 def job_injuries(args) -> None:
     teams = {t["name"]: t["abbr"] for t in list_teams()}
     rows = parse_injuries(http_get_json(f"{ESPN_BASE}/injuries"), teams)
@@ -310,7 +375,7 @@ def job_injuries(args) -> None:
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--job", choices=["stats", "players", "injuries"], action="append",
+    p.add_argument("--job", choices=["stats", "players", "injuries", "ratings"], action="append",
                    help="要執行的工作，可重複指定；預設只跑 stats")
     p.add_argument("--date", help="美東日期 YYYY-MM-DD（stats）")
     p.add_argument("--days", type=int, default=2, help="往回抓幾天（stats，預設 2，可吸收數據修正）")
@@ -318,7 +383,7 @@ def main() -> int:
     args = p.parse_args()
 
     for job in args.job or ["stats"]:
-        {"stats": job_stats, "players": job_players, "injuries": job_injuries}[job](args)
+        {"stats": job_stats, "players": job_players, "injuries": job_injuries, "ratings": job_ratings}[job](args)
     return 0
 
 
