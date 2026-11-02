@@ -1,0 +1,54 @@
+name: Daily NBA stats
+
+on:
+  schedule:
+    # 時間是 UTC。避開整點（整點最塞，容易延遲）。
+    # 每天一次：08:17 UTC = 台灣 16:17 / 日本 17:17，美西最晚的比賽也已結束。
+    # 每次會抓「最近 2 天」，所以前一天的官方數據修正也會在隔天自動補上。
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "只抓某一天（美東日期 YYYY-MM-DD），留空 = 最近 2 天"
+        required: false
+      days:
+        description: "往回抓幾天（例如補資料填 7）"
+        required: false
+        default: "2"
+
+permissions:
+  contents: read
+  actions: write   # keepalive 需要，用來避免 60 天沒活動被 GitHub 停用排程
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Fetch & upsert
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -n "${{ inputs.date }}" ]; then
+            python scripts/fetch_stats.py --date "${{ inputs.date }}"
+          else
+            python scripts/fetch_stats.py --days "${{ inputs.days || '2' }}"
+          fi
+
+  keepalive:
+    # 公開 repo 60 天沒活動，GitHub 會停用排程；這個 job 用 API 保持啟用（不會產生 commit）
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gautamkrishnar/keepalive-workflow@v2

@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>六人 Fantasy 排行榜</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* Layout: one column stat sheet — standings table on top, then a day-by-day box score per member. */
+:root {
+  --bg: #eef1f4;          /* cool gym-floor grey */
+  --surface: #ffffff;
+  --ink: #15212c;
+  --muted: #5b6876;
+  --line: #d5dce3;
+  --accent: #d9531e;      /* ball orange, used for the leader and live numbers only */
+  --court: #2a5b87;       /* secondary, for links and the selected day */
+  --row-alt: #f6f8fa;
+  --up: #1f7a4d;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Noto Sans TC", sans-serif;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151b; --surface: #17202a; --ink: #e7edf3; --muted: #93a1af; --line: #2a3643;
+    --accent: #f07a45; --court: #7fb2e0; --row-alt: #1b2531; --up: #5cc792; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151b; --surface: #17202a; --ink: #e7edf3; --muted: #93a1af; --line: #2a3643;
+  --accent: #f07a45; --court: #7fb2e0; --row-alt: #1b2531; --up: #5cc792; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.6 var(--font-body);
+}
+.wrap {
+  max-width: 880px; margin: 0 auto;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 28px;
+}
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 24px; }
+h1 {
+  margin: 0; font: 700 clamp(30px, 6vw, 44px)/1 var(--font-display);
+  letter-spacing: .01em; text-wrap: balance;
+}
+h1 small { display: block; font: 600 13px/1.4 var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.meta { color: var(--muted); font-size: 13px; }
+.demo-note { background: var(--surface); border: 1px dashed var(--line); padding: 10px 14px; font-size: 13px; color: var(--muted); }
+h2 { margin: 0 0 10px; font: 600 15px/1.2 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.num { font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+
+/* standings */
+.table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 10px 12px; text-align: left; white-space: nowrap; }
+th { font: 600 12px/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
+tbody tr:nth-child(even) { background: var(--row-alt); }
+td.r, th.r { text-align: right; }
+.rank { font: 700 22px/1 var(--font-display); width: 44px; color: var(--muted); }
+tr.leader .rank, tr.leader .total { color: var(--accent); }
+.member { font-weight: 700; }
+.total { font: 700 24px/1 var(--font-display); }
+.day { font: 600 18px/1 var(--font-display); }
+.gap { color: var(--muted); font-size: 13px; }
+svg.spark { display: block; }
+
+/* daily */
+.day-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.day-nav button {
+  font: 600 15px/1 var(--font-display); letter-spacing: .04em;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+  padding: 8px 12px; cursor: pointer;
+}
+.day-nav button:disabled { opacity: .4; cursor: default; }
+.day-nav button:focus-visible, select:focus-visible { outline: 2px solid var(--court); outline-offset: 2px; }
+.day-nav select { font: 15px var(--font-body); padding: 7px 8px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.boxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 14px; }
+.box { background: var(--surface); border: 1px solid var(--line); min-width: 0; }
+.box-head { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box-head .name { font-weight: 700; }
+.box-head .pts { font: 700 26px/1 var(--font-display); }
+.box table { font-size: 13px; }
+.box td, .box th { padding: 6px 10px; }
+.player { white-space: normal; min-width: 120px; }
+.player .tm { color: var(--muted); font-size: 12px; }
+.dnp td { color: var(--muted); }
+.fp { font: 700 16px/1 var(--font-display); }
+.empty { padding: 14px; color: var(--muted); font-size: 13px; }
+
+footer { color: var(--muted); font-size: 13px; }
+footer .rules { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; }
+footer .rules span b { color: var(--ink); font-family: var(--font-display); font-size: 15px; }
+
+@media (max-width: 520px) { .hide-sm { display: none; } }
+@media (prefers-reduced-motion: no-preference) { tbody tr { transition: background .15s; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><small>NBA 2026–27 · 私人聯盟</small>六人 Fantasy 排行榜</h1>
+    <div class="meta" id="meta">載入中…</div>
+  </header>
+
+  <div class="demo-note" id="demo-note" hidden>
+    目前是<b>示範資料</b>。在檔案最上方的 <code>CONFIG</code> 填入 Supabase URL 與 anon key，就會改讀你們聯盟的真實分數。
+  </div>
+
+  <section>
+    <h2>總排名</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th></th><th>玩家</th><th class="r">總分</th><th class="r">最新一天</th>
+          <th class="r hide-sm">與第一名差距</th><th class="hide-sm">累積走勢</th>
+        </tr></thead>
+        <tbody id="standings"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>每日成績</h2>
+    <div class="day-nav">
+      <button id="prev" type="button" aria-label="前一天">◀ 前一天</button>
+      <select id="day-select" aria-label="選擇日期"></select>
+      <button id="next" type="button" aria-label="後一天">後一天 ▶</button>
+    </div>
+    <div class="boxes" id="boxes"></div>
+  </section>
+
+  <footer>
+    <div>日期為美東比賽日。每天下午自動更新一次，分數依下列規則計算：</div>
+    <div class="rules" id="rules"></div>
+  </footer>
+</div>
+
+<script>
+// ============ 設定 ============
+// 填入 Supabase → Project Settings → API 的兩個值。
+// anon key 是公開金鑰，只能讀取（schema.sql 已設定 RLS），放在前端是安全的。
+// 千萬不要把 service_role key 放在這裡。
+const CONFIG = {
+  SUPABASE_URL: "https://zxookgdabykqdfkrmmfw.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_duF1APjQt9EH397JJ_Di6A_Z5ayRlr1",
+};
+// ==============================
+
+const DEMO = !CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY;
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => (Math.round(n * 10) / 10).toLocaleString("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path) {
+  const r = await fetch(`${CONFIG.SUPABASE_URL.replace(/\/$/, "")}/rest/v1/${path}`, {
+    headers: { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(`讀取 ${path.split("?")[0]} 失敗（HTTP ${r.status}）。請確認 schema.sql 已執行、anon key 正確。`);
+  return r.json();
+}
+
+// ---------- 示範資料 ----------
+function demoData() {
+  const members = ["Alice", "Bob", "Chris", "Dana", "Eric", "Fiona"];
+  const pool = [
+    ["Nikola Jokic","DEN"],["Luka Doncic","LAL"],["Giannis Antetokounmpo","MIL"],["Shai Gilgeous-Alexander","OKC"],
+    ["Jayson Tatum","BOS"],["Anthony Edwards","MIN"],["Victor Wembanyama","SA"],["Tyrese Haliburton","IND"],
+    ["Jalen Brunson","NY"],["Donovan Mitchell","CLE"],["Cade Cunningham","DET"],["Devin Booker","PHX"],
+    ["Stephen Curry","GS"],["LeBron James","LAL"],["Domantas Sabonis","SAC"],["Trae Young","ATL"],
+    ["Bam Adebayo","MIA"],["Jaren Jackson Jr.","MEM"],
+  ];
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const days = []; const start = new Date("2026-10-21T12:00:00");
+  for (let i = 0; i < 12; i++) { const d = new Date(start); d.setDate(d.getDate() + i); days.push(d.toISOString().slice(0, 10)); }
+  const rules = [["pts",1,"得分"],["reb",1.2,"籃板"],["ast",1.5,"助攻"],["stl",3,"抄截"],["blk",3,"阻攻"],["tov",-1,"失誤"]];
+  const W = Object.fromEntries(rules.map(([s, w]) => [s, w]));
+  const games = [];
+  days.forEach((day) => {
+    pool.forEach(([name, team], pi) => {
+      if (rnd() < 0.45) return; // 沒比賽
+      const dnp = rnd() < 0.06;
+      const g = dnp ? { pts:0,reb:0,ast:0,stl:0,blk:0,tov:0,minutes:0 } : {
+        pts: Math.round(12 + rnd() * 24), reb: Math.round(2 + rnd() * 10), ast: Math.round(1 + rnd() * 9),
+        stl: Math.round(rnd() * 3), blk: Math.round(rnd() * 3), tov: Math.round(rnd() * 5), minutes: Math.round(26 + rnd() * 12),
+      };
+      g.fgm = Math.round(g.pts / 2.4); g.fga = g.fgm + Math.round(rnd() * 9);
+      const fp = Math.round((g.pts*W.pts + g.reb*W.reb + g.ast*W.ast + g.stl*W.stl + g.blk*W.blk + g.tov*W.tov) * 10) / 10;
+      games.push({ member_name: members[pi % 6], member_id: (pi % 6) + 1, game_date: day, player_name: name, team,
+        opponent: "", did_not_play: dnp, fantasy_points: fp, ...g });
+    });
+  });
+  return { members, days, games, rules: rules.map(([stat, weight, note]) => ({ stat, weight, note })) };
+}
+
+// ---------- 載入 ----------
+let STATE = { daily: [], leaderboard: [], days: [], rules: [], dayCache: {} };
+
+async function load() {
+  if (DEMO) {
+    $("demo-note").hidden = false;
+    const d = demoData();
+    const daily = {};
+    d.games.forEach((g) => {
+      const k = `${g.member_id}|${g.game_date}`;
+      daily[k] ??= { member_id: g.member_id, member_name: g.member_name, game_date: g.game_date, points: 0 };
+      daily[k].points += g.fantasy_points;
+    });
+    STATE.daily = Object.values(daily);
+    const latest = d.days[d.days.length - 1];
+    STATE.leaderboard = d.members.map((name, i) => {
+      const mine = STATE.daily.filter((x) => x.member_id === i + 1);
+      return { member_id: i + 1, member_name: name,
+        total_points: mine.reduce((a, b) => a + b.points, 0),
+        latest_day_points: mine.filter((x) => x.game_date === latest).reduce((a, b) => a + b.points, 0),
+        latest_day: latest };
+    }).sort((a, b) => b.total_points - a.total_points).map((r, i) => ({ ...r, rank: i + 1 }));
+    STATE.rules = d.rules;
+    d.days.forEach((day) => (STATE.dayCache[day] = d.games.filter((g) => g.game_date === day)));
+    $("meta").textContent = `示範資料 · 最新比賽日 ${latest}`;
+  } else {
+    const [lb, daily, rules, last] = await Promise.all([
+      api("leaderboard?select=*&order=rank.asc,member_name.asc"),
+      api("member_daily_scores?select=member_id,member_name,game_date,points&order=game_date.asc"),
+      api("scoring_rules?select=*&order=stat.asc"),
+      api("player_game_stats?select=updated_at&order=updated_at.desc&limit=1"),
+    ]);
+    STATE.leaderboard = lb; STATE.daily = daily; STATE.rules = rules;
+    const upd = last[0]?.updated_at ? new Date(last[0].updated_at).toLocaleString("zh-TW", { hour12: false }) : "尚無資料";
+    $("meta").textContent = `最新比賽日 ${lb[0]?.latest_day ?? "—"} · 更新於 ${upd}`;
+  }
+  STATE.days = [...new Set(STATE.daily.map((d) => d.game_date))].sort();
+  renderStandings(); renderRules(); setupDays();
+}
+
+// ---------- 排名 ----------
+function sparkline(memberId, maxTotal) {
+  const pts = STATE.days.map((day) => STATE.daily.find((d) => d.member_id === memberId && d.game_date === day)?.points ?? 0);
+  let run = 0; const cum = pts.map((p) => (run += +p));
+  const w = 120, h = 28, n = Math.max(cum.length - 1, 1);
+  if (!cum.length) return "";
+  const xy = cum.map((v, i) => [ (i / n) * (w - 4) + 2, h - 2 - (maxTotal ? (v / maxTotal) * (h - 4) : 0) ]);
+  const line = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
+  const area = `${line}L${xy.at(-1)[0].toFixed(1)},${h - 2}L${xy[0][0].toFixed(1)},${h - 2}Z`;
+  const [ex, ey] = xy.at(-1);
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <path d="${area}" fill="var(--court)" fill-opacity=".12"></path>
+    <path d="${line}" fill="none" stroke="var(--court)" stroke-width="1.5"></path>
+    <circle cx="${ex}" cy="${ey}" r="2.5" fill="var(--court)"></circle></svg>`;
+}
+
+function renderStandings() {
+  const lb = STATE.leaderboard;
+  const top = +(lb[0]?.total_points ?? 0);
+  $("standings").innerHTML = lb.map((r) => `
+    <tr class="${r.rank == 1 && top > 0 ? "leader" : ""}">
+      <td class="rank num">${r.rank}</td>
+      <td class="member">${esc(r.member_name)}</td>
+      <td class="r total num">${fmt(+r.total_points)}</td>
+      <td class="r day num">${+r.latest_day_points ? "+" + fmt(+r.latest_day_points) : "—"}</td>
+      <td class="r gap num hide-sm">${r.rank == 1 ? "—" : "−" + fmt(top - +r.total_points)}</td>
+      <td class="hide-sm">${sparkline(r.member_id, top)}</td>
+    </tr>`).join("") || `<tr><td colspan="6" class="empty">還沒有玩家。請先執行 seed_example.sql 建立玩家與陣容。</td></tr>`;
+}
+
+function renderRules() {
+  const names = { pts:"得分", reb:"籃板", oreb:"進攻籃板", dreb:"防守籃板", ast:"助攻", stl:"抄截", blk:"阻攻", tov:"失誤", pf:"犯規",
+    fgm:"投籃命中", fga:"投籃出手", fg3m:"三分命中", fg3a:"三分出手", ftm:"罰球命中", fta:"罰球出手", plus_minus:"正負值",
+    double_double:"大兩雙", triple_double:"大三元" };
+  $("rules").innerHTML = STATE.rules.filter((r) => +r.weight !== 0)
+    .map((r) => `<span>${esc(names[r.stat] ?? r.stat)} <b>${+r.weight > 0 ? "+" : ""}${+r.weight}</b></span>`).join("");
+}
+
+// ---------- 每日 ----------
+let dayIdx = 0;
+function setupDays() {
+  const sel = $("day-select");
+  sel.innerHTML = STATE.days.map((d, i) => `<option value="${i}">${d}</option>`).join("");
+  dayIdx = Math.max(STATE.days.length - 1, 0);
+  sel.onchange = () => { dayIdx = +sel.value; showDay(); };
+  $("prev").onclick = () => { dayIdx--; showDay(); };
+  $("next").onclick = () => { dayIdx++; showDay(); };
+  showDay();
+}
+
+async function showDay() {
+  const day = STATE.days[dayIdx];
+  $("day-select").value = String(dayIdx);
+  $("prev").disabled = dayIdx <= 0;
+  $("next").disabled = dayIdx >= STATE.days.length - 1;
+  if (!day) { $("boxes").innerHTML = `<div class="empty">還沒有比賽數據。第一次排程跑完後就會出現。</div>`; return; }
+  if (!STATE.dayCache[day]) {
+    $("boxes").innerHTML = `<div class="empty">載入 ${day}…</div>`;
+    STATE.dayCache[day] = await api(`member_player_games?game_date=eq.${day}&select=member_id,member_name,player_name,team,opponent,did_not_play,minutes,pts,reb,ast,stl,blk,tov,fgm,fga,fantasy_points&order=fantasy_points.desc`);
+  }
+  const rows = STATE.dayCache[day];
+  const order = STATE.leaderboard.map((r) => r.member_name);
+  $("boxes").innerHTML = order.map((name) => {
+    const mine = rows.filter((r) => r.member_name === name).sort((a, b) => b.fantasy_points - a.fantasy_points);
+    const total = mine.reduce((a, b) => a + +b.fantasy_points, 0);
+    const body = mine.length ? `<div class="table-scroll" style="border:0"><table>
+      <thead><tr><th>球員</th><th class="r">分</th><th class="r">板</th><th class="r">助</th><th class="r">抄</th><th class="r">阻</th><th class="r">失</th><th class="r">FP</th></tr></thead>
+      <tbody>${mine.map((p) => p.did_not_play
+        ? `<tr class="dnp"><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span></td><td colspan="6">未上場</td><td class="r fp num">0.0</td></tr>`
+        : `<tr><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span></td>
+            <td class="r num">${p.pts}</td><td class="r num">${p.reb}</td><td class="r num">${p.ast}</td>
+            <td class="r num">${p.stl}</td><td class="r num">${p.blk}</td><td class="r num">${p.tov}</td>
+            <td class="r fp num">${fmt(+p.fantasy_points)}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">這天陣中沒有球員出賽</div>`;
+    return `<article class="box"><div class="box-head"><span class="name">${esc(name)}</span><span class="pts num">${fmt(total)}</span></div>${body}</article>`;
+  }).join("");
+}
+
+load().catch((e) => { $("meta").textContent = e.message; });
+</script>
+</body>
+</html>

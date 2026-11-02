@@ -1,0 +1,210 @@
+"""
+每日抓取 NBA 球員數據並寫入 Supabase。
+
+用法：
+  python scripts/fetch_stats.py                    # 抓最近 2 天（美東日期），已完賽的比賽
+  python scripts/fetch_stats.py --date 2026-11-01  # 只抓指定日期
+  python scripts/fetch_stats.py --days 7           # 補抓最近 7 天
+  python scripts/fetch_stats.py --dry-run          # 只抓資料印出來，不寫資料庫
+
+需要的環境變數（--dry-run 時不需要）：
+  SUPABASE_URL          例如 https://xxxx.supabase.co
+  SUPABASE_SERVICE_KEY  Supabase 的 service_role key（只放在 GitHub Secrets，不要放前端）
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import requests
+
+ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
+ET = ZoneInfo("America/New_York")
+HEADERS = {"User-Agent": "Mozilla/5.0 (nba-fantasy hobby project)"}
+
+
+# ---------------------------------------------------------------- ESPN
+
+def http_get_json(url: str, params: dict | None = None, retries: int = 3) -> dict:
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, params=params, headers=HEADERS, timeout=20)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"GET {url} failed: {last_err}")
+
+
+def list_games(day: date) -> list[dict]:
+    """回傳該美東日期的比賽清單：[{id, completed, state, name}]"""
+    data = http_get_json(f"{ESPN_BASE}/scoreboard", {"dates": day.strftime("%Y%m%d")})
+    games = []
+    for ev in data.get("events", []):
+        st = (ev.get("status") or {}).get("type") or {}
+        games.append({
+            "id": str(ev["id"]),
+            "name": ev.get("shortName") or ev.get("name", ""),
+            "completed": bool(st.get("completed")),
+            "state": st.get("state", ""),  # pre / in / post
+        })
+    return games
+
+
+def _split_made_att(v: str) -> tuple[int, int]:
+    try:
+        made, att = v.split("-")
+        return int(made), int(att)
+    except Exception:  # noqa: BLE001
+        return 0, 0
+
+
+def _to_int(v) -> int:
+    try:
+        return int(str(v).replace("+", ""))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _to_minutes(v) -> float:
+    s = str(v or "").strip()
+    if not s or s in {"--", "-"}:
+        return 0.0
+    if ":" in s:  # 有時會是 "34:12"
+        mm, ss = s.split(":", 1)
+        return round(_to_int(mm) + _to_int(ss) / 60, 2)
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+# ESPN 欄位標籤 → 我們的欄位。標籤以 labels / names 為準，順序不寫死。
+LABEL_MAP = {
+    "MIN": "minutes", "PTS": "pts", "REB": "reb", "OREB": "oreb", "DREB": "dreb",
+    "AST": "ast", "STL": "stl", "BLK": "blk", "TO": "tov", "PF": "pf", "+/-": "plus_minus",
+    "FG": ("fgm", "fga"), "3PT": ("fg3m", "fg3a"), "FT": ("ftm", "fta"),
+}
+
+
+def parse_summary(summary: dict, game_id: str, game_date: date) -> list[dict]:
+    """把 ESPN summary 的 boxscore.players 轉成 player_game_stats 列。"""
+    rows: list[dict] = []
+    teams = (summary.get("boxscore") or {}).get("players") or []
+    abbrs = [((t.get("team") or {}).get("abbreviation") or "") for t in teams]
+
+    for idx, team_block in enumerate(teams):
+        team = abbrs[idx] if idx < len(abbrs) else ""
+        opponent = abbrs[1 - idx] if len(abbrs) == 2 else ""
+        for stat_group in team_block.get("statistics") or []:
+            labels = stat_group.get("labels") or stat_group.get("names") or []
+            for a in stat_group.get("athletes") or []:
+                ath = a.get("athlete") or {}
+                pid = str(ath.get("id") or "")
+                if not pid:
+                    continue
+                row = {
+                    "game_id": game_id, "player_id": pid, "game_date": game_date.isoformat(),
+                    "player_name": ath.get("displayName") or ath.get("shortName") or pid,
+                    "team": team, "opponent": opponent,
+                    "did_not_play": bool(a.get("didNotPlay")) or not a.get("stats"),
+                    "minutes": 0.0,
+                    "pts": 0, "reb": 0, "oreb": 0, "dreb": 0, "ast": 0, "stl": 0, "blk": 0,
+                    "tov": 0, "pf": 0, "fgm": 0, "fga": 0, "fg3m": 0, "fg3a": 0,
+                    "ftm": 0, "fta": 0, "plus_minus": 0,
+                }
+                for label, value in zip(labels, a.get("stats") or []):
+                    key = LABEL_MAP.get(str(label).upper())
+                    if key is None:
+                        continue
+                    if isinstance(key, tuple):
+                        row[key[0]], row[key[1]] = _split_made_att(str(value))
+                    elif key == "minutes":
+                        row["minutes"] = _to_minutes(value)
+                    else:
+                        row[key] = _to_int(value)
+                rows.append(row)
+    return rows
+
+
+# ---------------------------------------------------------------- Supabase
+
+def upsert_stats(rows: list[dict]) -> None:
+    url = os.environ["SUPABASE_URL"].rstrip("/")
+    key = os.environ["SUPABASE_SERVICE_KEY"]
+    now = datetime.now(timezone.utc).isoformat()
+    for r in rows:
+        r["updated_at"] = now
+    resp = requests.post(
+        f"{url}/rest/v1/player_game_stats",
+        params={"on_conflict": "game_id,player_id"},
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        data=json.dumps(rows),
+        timeout=30,
+    )
+    if resp.status_code >= 300:
+        raise RuntimeError(f"Supabase upsert failed {resp.status_code}: {resp.text[:500]}")
+
+
+# ---------------------------------------------------------------- main
+
+def target_dates(args) -> list[date]:
+    if args.date:
+        return [date.fromisoformat(args.date)]
+    today_et = datetime.now(ET).date()
+    # 最近 N 天（不含今天，因為今天的比賽通常還沒打完）
+    return [today_et - timedelta(days=i) for i in range(args.days, 0, -1)]
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--date", help="美東日期 YYYY-MM-DD")
+    p.add_argument("--days", type=int, default=2, help="往回抓幾天（預設 2，可吸收數據修正）")
+    p.add_argument("--dry-run", action="store_true")
+    args = p.parse_args()
+
+    total = 0
+    for d in target_dates(args):
+        games = list_games(d)
+        done = [g for g in games if g["completed"]]
+        print(f"[{d}] {len(games)} games, {len(done)} completed")
+        day_rows: list[dict] = []
+        for g in done:
+            summary = http_get_json(f"{ESPN_BASE}/summary", {"event": g["id"]})
+            rows = parse_summary(summary, g["id"], d)
+            print(f"  {g['name']:<12} {len(rows)} players")
+            day_rows.extend(rows)
+            time.sleep(0.5)  # 對 ESPN 客氣一點
+        for g in games:
+            if not g["completed"]:
+                print(f"  {g['name']:<12} skipped (state={g['state']}), 下次執行會再抓")
+        if not day_rows:
+            continue
+        if args.dry_run:
+            top = sorted(day_rows, key=lambda r: r["pts"], reverse=True)[:5]
+            for r in top:
+                print(f"    {r['player_name']:<24} {r['team']:<4} "
+                      f"{r['pts']}pts {r['reb']}reb {r['ast']}ast  id={r['player_id']}")
+        else:
+            upsert_stats(day_rows)
+        total += len(day_rows)
+
+    print(f"Done. {total} player rows {'parsed' if args.dry_run else 'upserted'}.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
