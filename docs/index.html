@@ -3,322 +3,807 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>六人 Fantasy 排行榜</title>
+<title>六人 Fantasy 聯盟</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-/* Layout: one column stat sheet — standings table on top, then a day-by-day box score per member. */
+/* Layout: one column stat sheet with a sticky tab bar — standings, charts, team, trades. */
 :root {
-  --bg: #eef1f4;          /* cool gym-floor grey */
-  --surface: #ffffff;
-  --ink: #15212c;
-  --muted: #5b6876;
-  --line: #d5dce3;
-  --accent: #d9531e;      /* ball orange, used for the leader and live numbers only */
-  --court: #2a5b87;       /* secondary, for links and the selected day */
-  --row-alt: #f6f8fa;
-  --up: #1f7a4d;
+  --bg: #eef1f4; --surface: #ffffff; --ink: #15212c; --muted: #5b6876; --line: #d5dce3; --row-alt: #f6f8fa;
+  --accent: #d9531e; --court: #2a5b87; --good: #1f7a4d; --warn: #b7791f; --bad: #c0392b; --chip: #e7ecf1;
+  --m1: #2a5b87; --m2: #d9531e; --m3: #1f8a70; --m4: #8e44ad; --m5: #c9a227; --m6: #c0392b;
   --font-display: "Barlow Condensed", "Arial Narrow", "Noto Sans TC", sans-serif;
   --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f151b; --surface: #17202a; --ink: #e7edf3; --muted: #93a1af; --line: #2a3643;
-    --accent: #f07a45; --court: #7fb2e0; --row-alt: #1b2531; --up: #5cc792; color-scheme: dark;
+    --bg: #0f151b; --surface: #17202a; --ink: #e7edf3; --muted: #93a1af; --line: #2a3643; --row-alt: #1b2531;
+    --accent: #f07a45; --court: #7fb2e0; --good: #5cc792; --warn: #e3b04b; --bad: #ef6f5e; --chip: #223040;
+    --m1: #7fb2e0; --m2: #f07a45; --m3: #4fc6a3; --m4: #c08ae0; --m5: #e8c95a; --m6: #ef6f5e; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f151b; --surface: #17202a; --ink: #e7edf3; --muted: #93a1af; --line: #2a3643;
-  --accent: #f07a45; --court: #7fb2e0; --row-alt: #1b2531; --up: #5cc792; color-scheme: dark;
+  --bg: #0f151b; --surface: #17202a; --ink: #e7edf3; --muted: #93a1af; --line: #2a3643; --row-alt: #1b2531;
+  --accent: #f07a45; --court: #7fb2e0; --good: #5cc792; --warn: #e3b04b; --bad: #ef6f5e; --chip: #223040;
+  --m1: #7fb2e0; --m2: #f07a45; --m3: #4fc6a3; --m4: #c08ae0; --m5: #e8c95a; --m6: #ef6f5e; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
-body {
-  margin: 0; background: var(--bg); color: var(--ink);
-  font: 15px/1.6 var(--font-body);
-}
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 var(--font-body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
 .wrap {
-  max-width: 880px; margin: 0 auto;
-  padding-block: 28px 56px;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
-  display: grid; gap: 28px;
+  max-width: 960px; margin: 0 auto; padding-block: 24px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 24px;
 }
-header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 24px; }
-h1 {
-  margin: 0; font: 700 clamp(30px, 6vw, 44px)/1 var(--font-display);
-  letter-spacing: .01em; text-wrap: balance;
-}
-h1 small { display: block; font: 600 13px/1.4 var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
-.meta { color: var(--muted); font-size: 13px; }
-.demo-note { background: var(--surface); border: 1px dashed var(--line); padding: 10px 14px; font-size: 13px; color: var(--muted); }
-h2 { margin: 0 0 10px; font: 600 15px/1.2 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
-.num { font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+button, select, input { font: inherit; color: inherit; }
+button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--court); outline-offset: 2px; }
 
-/* standings */
-.table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); }
+/* header + tabs */
+header.top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 10px 24px; }
+h1 { margin: 0; font: 700 clamp(30px, 6vw, 44px)/1 var(--font-display); letter-spacing: .01em; text-wrap: balance; }
+h1 small { display: block; font: 600 13px/1.4 var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.who { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.who b { color: var(--ink); }
+nav.tabs {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none;
+}
+nav.tabs a {
+  flex: none; padding: 10px 14px; text-decoration: none; color: var(--muted);
+  font: 600 17px/1 var(--font-display); letter-spacing: .06em; border-bottom: 3px solid transparent;
+}
+nav.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+nav.tabs .badge { display: inline-block; min-width: 18px; padding: 1px 5px; margin-left: 4px; border-radius: 9px; background: var(--accent); color: var(--surface); font-size: 12px; text-align: center; }
+
+h2 { margin: 0 0 10px; font: 600 15px/1.2 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h2 .sub { font: 400 13px var(--font-body); letter-spacing: 0; text-transform: none; }
+.view { display: grid; gap: 28px; }
+.num { font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.panel { background: var(--surface); border: 1px solid var(--line); min-width: 0; }
+.panel-pad { padding: 14px 16px; }
+.empty { padding: 14px 16px; color: var(--muted); font-size: 13px; }
+
+/* buttons */
+.btn { background: var(--surface); border: 1px solid var(--line); padding: 7px 12px; cursor: pointer; font-weight: 500; font-size: 14px; }
+.btn:hover:not(:disabled) { border-color: var(--muted); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--court); border-color: var(--court); color: var(--surface); }
+.btn.go { background: var(--good); border-color: var(--good); color: var(--surface); }
+.btn.no { color: var(--bad); border-color: var(--bad); }
+.btn.sm { padding: 4px 9px; font-size: 13px; }
+select.inp, input.inp { background: var(--surface); border: 1px solid var(--line); padding: 7px 8px; min-width: 0; }
+
+/* tables */
+.table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
-th, td { padding: 10px 12px; text-align: left; white-space: nowrap; }
+th, td { padding: 9px 12px; text-align: left; white-space: nowrap; }
 th { font: 600 12px/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
 tbody tr:nth-child(even) { background: var(--row-alt); }
 td.r, th.r { text-align: right; }
-.rank { font: 700 22px/1 var(--font-display); width: 44px; color: var(--muted); }
+.rank { font: 700 22px/1 var(--font-display); width: 40px; color: var(--muted); }
 tr.leader .rank, tr.leader .total { color: var(--accent); }
-.member { font-weight: 700; }
 .total { font: 700 24px/1 var(--font-display); }
-.day { font: 600 18px/1 var(--font-display); }
-.gap { color: var(--muted); font-size: 13px; }
-svg.spark { display: block; }
+.big { font: 600 18px/1 var(--font-display); }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
 
-/* daily */
-.day-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.day-nav button {
-  font: 600 15px/1 var(--font-display); letter-spacing: .04em;
-  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
-  padding: 8px 12px; cursor: pointer;
-}
-.day-nav button:disabled { opacity: .4; cursor: default; }
-.day-nav button:focus-visible, select:focus-visible { outline: 2px solid var(--court); outline-offset: 2px; }
-.day-nav select { font: 15px var(--font-body); padding: 7px 8px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+/* day / week nav */
+.pager { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .boxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 14px; }
-.box { background: var(--surface); border: 1px solid var(--line); min-width: 0; }
-.box-head { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box-head { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid var(--line); gap: 8px; }
 .box-head .name { font-weight: 700; }
 .box-head .pts { font: 700 26px/1 var(--font-display); }
 .box table { font-size: 13px; }
 .box td, .box th { padding: 6px 10px; }
-.player { white-space: normal; min-width: 120px; }
-.player .tm { color: var(--muted); font-size: 12px; }
+.player { white-space: normal; min-width: 130px; }
+.tm { color: var(--muted); font-size: 12px; }
 .dnp td { color: var(--muted); }
 .fp { font: 700 16px/1 var(--font-display); }
-.empty { padding: 14px; color: var(--muted); font-size: 13px; }
+
+/* status chips */
+.chip { display: inline-block; padding: 1px 7px; font-size: 12px; font-weight: 500; border-radius: 3px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+.chip.out { background: var(--bad); color: var(--surface); }
+.chip.dtd { background: var(--warn); color: var(--surface); }
+.chip.susp { background: var(--muted); color: var(--surface); }
+.chip.next { background: transparent; border: 1px dashed var(--court); color: var(--court); }
+.chip.ok { background: var(--good); color: var(--surface); }
+
+/* charts */
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 14px; }
+.chart-card { padding: 14px 16px 10px; }
+.chart-card h3 { margin: 0 0 2px; font: 600 18px/1.2 var(--font-display); letter-spacing: .03em; }
+.chart-card p { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+.canvas-box { position: relative; height: 260px; }
+.wide { grid-column: 1 / -1; }
+.heat { display: grid; gap: 2px; overflow-x: auto; padding-bottom: 4px; }
+.heat .lbl { font-size: 12px; color: var(--muted); white-space: nowrap; padding-right: 6px; align-self: center; }
+.heat .cell { height: 26px; min-width: 22px; display: grid; place-items: center; font: 600 11px var(--font-display); color: var(--ink); }
+.heat .hd { font: 600 11px var(--font-display); color: var(--muted); text-align: center; }
+.contrib-row { display: grid; grid-template-columns: 70px 1fr 56px; gap: 10px; align-items: center; margin-bottom: 8px; }
+.contrib-bar { display: flex; height: 26px; background: var(--chip); overflow: hidden; }
+.contrib-bar span { display: block; height: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; line-height: 26px; padding: 0 5px; color: var(--surface); border-right: 1px solid var(--surface); }
+
+/* team */
+.team-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.pl { display: flex; align-items: center; gap: 10px; white-space: normal; min-width: 180px; }
+.pl img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: var(--chip); flex: none; }
+.pl .nm { font-weight: 600; line-height: 1.25; }
+.pl .meta { font-size: 12px; color: var(--muted); line-height: 1.3; }
+tr.hurt { box-shadow: inset 3px 0 0 var(--bad); }
+.swap-box { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.inj-list { display: grid; gap: 6px; }
+.inj-item { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: start; font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.inj-item:last-child { border-bottom: 0; }
+
+/* trades */
+.trade { padding: 14px 16px; display: grid; gap: 10px; }
+.trade-top { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.pairs { display: grid; gap: 6px; }
+.pair { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; font-size: 14px; }
+.pair .side { min-width: 0; overflow-wrap: anywhere; }
+.pair .side:last-child { text-align: right; }
+.pair .arrow { color: var(--muted); font-family: var(--font-display); }
+.votebar { display: flex; gap: 3px; }
+.votebar i { width: 22px; height: 8px; background: var(--chip); }
+.votebar i.y { background: var(--good); }
+.votebar i.n { background: var(--bad); }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px; }
+.pick-list { display: grid; gap: 2px; max-height: 420px; overflow-y: auto; }
+.pick-list label { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; cursor: pointer; font-size: 14px; }
+.pick-list label:hover { background: var(--row-alt); }
+.pick-list .ord { font: 700 13px var(--font-display); color: var(--court); min-width: 14px; }
+.form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+/* login dialog + toast */
+.overlay { position: fixed; inset: 0; background: rgb(0 0 0 / .45); display: grid; place-items: center; z-index: 20; padding: 16px; }
+.dialog { background: var(--surface); border: 1px solid var(--line); padding: 20px; width: min(360px, 100%); display: grid; gap: 12px; }
+.dialog h3 { margin: 0; font: 700 22px var(--font-display); }
+.err { color: var(--bad); font-size: 13px; min-height: 1em; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 10px 16px; z-index: 30; font-size: 14px; max-width: calc(100% - 32px); }
 
 footer { color: var(--muted); font-size: 13px; }
 footer .rules { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; }
-footer .rules span b { color: var(--ink); font-family: var(--font-display); font-size: 15px; }
+footer .rules b { color: var(--ink); font-family: var(--font-display); font-size: 15px; }
 
-@media (max-width: 520px) { .hide-sm { display: none; } }
-@media (prefers-reduced-motion: no-preference) { tbody tr { transition: background .15s; } }
+@media (max-width: 560px) { .hide-sm { display: none; } .contrib-row { grid-template-columns: 56px 1fr 48px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1><small>NBA 2026–27 · 私人聯盟</small>六人 Fantasy 排行榜</h1>
-    <div class="meta" id="meta">載入中…</div>
+  <header class="top">
+    <h1><small>NBA 2026–27 · 私人聯盟</small>六人 Fantasy 聯盟</h1>
+    <div class="who" id="who"></div>
   </header>
 
-  <div class="demo-note" id="demo-note" hidden>
-    目前是<b>示範資料</b>。在檔案最上方的 <code>CONFIG</code> 填入 Supabase URL 與 anon key，就會改讀你們聯盟的真實分數。
-  </div>
+  <nav class="tabs" id="tabs">
+    <a href="#standings">排行榜</a>
+    <a href="#charts">圖表</a>
+    <a href="#team">球隊與傷兵</a>
+    <a href="#trades">交易區</a>
+  </nav>
 
-  <section>
-    <h2>總排名</h2>
-    <div class="table-scroll">
-      <table>
-        <thead><tr>
-          <th></th><th>玩家</th><th class="r">總分</th><th class="r">最新一天</th>
-          <th class="r hide-sm">與第一名差距</th><th class="hide-sm">累積走勢</th>
-        </tr></thead>
-        <tbody id="standings"></tbody>
-      </table>
+  <div id="meta" class="muted" style="font-size:13px">載入中…</div>
+
+  <!-- 排行榜 -->
+  <section class="view" id="v-standings" hidden>
+    <div>
+      <h2>總排名</h2>
+      <div class="panel table-scroll">
+        <table>
+          <thead><tr><th></th><th>玩家</th><th class="r">總分</th><th class="r">本週</th><th class="r hide-sm">最新一天</th><th class="r hide-sm">與第一名</th><th class="hide-sm">走勢</th></tr></thead>
+          <tbody id="standings"></tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <h2>每週累積 <span class="sub">週一到週日（美東日期）</span></h2>
+      <div class="pager">
+        <button class="btn" id="wk-prev" type="button">◀ 前一週</button>
+        <select class="inp" id="wk-select" aria-label="選擇週次"></select>
+        <button class="btn" id="wk-next" type="button">後一週 ▶</button>
+      </div>
+      <div class="panel table-scroll">
+        <table>
+          <thead><tr><th></th><th>玩家</th><th class="r">本週得分</th><th class="r">有出賽天數</th><th class="hide-sm">每日</th></tr></thead>
+          <tbody id="weekly"></tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <h2>每日成績</h2>
+      <div class="pager">
+        <button class="btn" id="day-prev" type="button">◀ 前一天</button>
+        <select class="inp" id="day-select" aria-label="選擇日期"></select>
+        <button class="btn" id="day-next" type="button">後一天 ▶</button>
+      </div>
+      <div class="boxes" id="boxes"></div>
     </div>
   </section>
 
-  <section>
-    <h2>每日成績</h2>
-    <div class="day-nav">
-      <button id="prev" type="button" aria-label="前一天">◀ 前一天</button>
-      <select id="day-select" aria-label="選擇日期"></select>
-      <button id="next" type="button" aria-label="後一天">後一天 ▶</button>
+  <!-- 圖表 -->
+  <section class="view" id="v-charts" hidden>
+    <div class="charts">
+      <div class="panel chart-card wide">
+        <h3>累積總分走勢</h3><p>每天結束後的總分，看誰一路領先、誰在追趕。</p>
+        <div class="canvas-box"><canvas id="c-cum"></canvas></div>
+      </div>
+      <div class="panel chart-card">
+        <h3>每週得分</h3><p>每週一到週日的得分。</p>
+        <div class="canvas-box"><canvas id="c-week"></canvas></div>
+      </div>
+      <div class="panel chart-card">
+        <h3>每週排名變化</h3><p>1 是當週第一名。</p>
+        <div class="canvas-box"><canvas id="c-rank"></canvas></div>
+      </div>
+      <div class="panel chart-card wide">
+        <h3>每日得分熱力圖</h3><p>顏色越深代表那天得分越高，格子裡是分數。</p>
+        <div class="heat" id="c-heat"></div>
+      </div>
+      <div class="panel chart-card wide">
+        <h3>誰在扛分</h3><p>本季每隊得分來自哪些球員（只算先發期間）。</p>
+        <div id="c-contrib"></div>
+      </div>
     </div>
-    <div class="boxes" id="boxes"></div>
+  </section>
+
+  <!-- 球隊 -->
+  <section class="view" id="v-team" hidden>
+    <div>
+      <h2>聯盟傷兵 <span class="sub">名單中的受傷球員，每 2 小時更新</span></h2>
+      <div class="panel panel-pad"><div class="inj-list" id="inj-league"></div></div>
+    </div>
+    <div>
+      <div class="team-head">
+        <h2 style="margin:0">球隊陣容</h2>
+        <select class="inp" id="team-select" aria-label="選擇球隊"></select>
+      </div>
+      <div id="team-note" class="muted" style="font-size:13px;margin-bottom:10px"></div>
+      <div class="panel table-scroll" style="margin-bottom:14px">
+        <table>
+          <thead><tr><th>先發（算分）</th><th class="r">場均 FP</th><th class="r hide-sm">場數</th><th>狀態</th><th></th></tr></thead>
+          <tbody id="roster-active"></tbody>
+        </table>
+      </div>
+      <div class="panel table-scroll">
+        <table>
+          <thead><tr><th>替補</th><th class="r">場均 FP</th><th class="r hide-sm">場數</th><th>狀態</th><th></th></tr></thead>
+          <tbody id="roster-bench"></tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <h2>換人紀錄</h2>
+      <div class="panel table-scroll">
+        <table>
+          <thead><tr><th>生效日</th><th>換下</th><th>換上</th><th>原因</th></tr></thead>
+          <tbody id="changes"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 交易 -->
+  <section class="view" id="v-trades" hidden>
+    <div id="trade-new"></div>
+    <div>
+      <h2>進行中</h2>
+      <div class="inj-list" id="trades-open" style="gap:12px"></div>
+    </div>
+    <div>
+      <h2>交易紀錄</h2>
+      <div class="inj-list" id="trades-done" style="gap:12px"></div>
+    </div>
   </section>
 
   <footer>
-    <div>日期為美東比賽日。每天下午自動更新一次，分數依下列規則計算：</div>
+    <div>日期為美東比賽日。比賽數據每天下午更新一次；換人與交易都是隔天生效。分數依下列規則計算：</div>
     <div class="rules" id="rules"></div>
   </footer>
 </div>
 
+<div id="overlay-root"></div>
+
 <script>
 // ============ 設定 ============
-// 填入 Supabase → Project Settings → API 的兩個值。
-// anon key 是公開金鑰，只能讀取（schema.sql 已設定 RLS），放在前端是安全的。
-// 千萬不要把 service_role key 放在這裡。
+// publishable key 是公開金鑰，只能讀取與呼叫有密碼保護的 API，放在前端是安全的。
 const CONFIG = {
   SUPABASE_URL: "https://zxookgdabykqdfkrmmfw.supabase.co",
   SUPABASE_ANON_KEY: "sb_publishable_duF1APjQt9EH397JJ_Di6A_Z5ayRlr1",
 };
 // ==============================
 
-const DEMO = !CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY;
 const $ = (id) => document.getElementById(id);
-const fmt = (n) => (Math.round(n * 10) / 10).toLocaleString("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n) => (Math.round(+n * 10) / 10).toLocaleString("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const md = (d) => { const [, m, dd] = String(d).split("-"); return `${+m}/${+dd}`; };
+const HEADERS = { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}` };
+const BASE = CONFIG.SUPABASE_URL.replace(/\/$/, "") + "/rest/v1/";
 
 async function api(path) {
-  const r = await fetch(`${CONFIG.SUPABASE_URL.replace(/\/$/, "")}/rest/v1/${path}`, {
-    headers: { apikey: CONFIG.SUPABASE_ANON_KEY, Authorization: `Bearer ${CONFIG.SUPABASE_ANON_KEY}` },
-  });
-  if (!r.ok) throw new Error(`讀取 ${path.split("?")[0]} 失敗（HTTP ${r.status}）。請確認 schema.sql 已執行、anon key 正確。`);
+  const r = await fetch(BASE + path, { headers: HEADERS });
+  if (!r.ok) throw new Error(`讀取資料失敗（${path.split("?")[0]}，HTTP ${r.status}）`);
   return r.json();
 }
-
-// ---------- 示範資料 ----------
-function demoData() {
-  const members = ["Alice", "Bob", "Chris", "Dana", "Eric", "Fiona"];
-  const pool = [
-    ["Nikola Jokic","DEN"],["Luka Doncic","LAL"],["Giannis Antetokounmpo","MIL"],["Shai Gilgeous-Alexander","OKC"],
-    ["Jayson Tatum","BOS"],["Anthony Edwards","MIN"],["Victor Wembanyama","SA"],["Tyrese Haliburton","IND"],
-    ["Jalen Brunson","NY"],["Donovan Mitchell","CLE"],["Cade Cunningham","DET"],["Devin Booker","PHX"],
-    ["Stephen Curry","GS"],["LeBron James","LAL"],["Domantas Sabonis","SAC"],["Trae Young","ATL"],
-    ["Bam Adebayo","MIA"],["Jaren Jackson Jr.","MEM"],
-  ];
-  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const days = []; const start = new Date("2026-10-21T12:00:00");
-  for (let i = 0; i < 12; i++) { const d = new Date(start); d.setDate(d.getDate() + i); days.push(d.toISOString().slice(0, 10)); }
-  const rules = [["pts",1,"得分"],["reb",1.2,"籃板"],["ast",1.5,"助攻"],["stl",3,"抄截"],["blk",3,"阻攻"],["tov",-1,"失誤"]];
-  const W = Object.fromEntries(rules.map(([s, w]) => [s, w]));
-  const games = [];
-  days.forEach((day) => {
-    pool.forEach(([name, team], pi) => {
-      if (rnd() < 0.45) return; // 沒比賽
-      const dnp = rnd() < 0.06;
-      const g = dnp ? { pts:0,reb:0,ast:0,stl:0,blk:0,tov:0,minutes:0 } : {
-        pts: Math.round(12 + rnd() * 24), reb: Math.round(2 + rnd() * 10), ast: Math.round(1 + rnd() * 9),
-        stl: Math.round(rnd() * 3), blk: Math.round(rnd() * 3), tov: Math.round(rnd() * 5), minutes: Math.round(26 + rnd() * 12),
-      };
-      g.fgm = Math.round(g.pts / 2.4); g.fga = g.fgm + Math.round(rnd() * 9);
-      const fp = Math.round((g.pts*W.pts + g.reb*W.reb + g.ast*W.ast + g.stl*W.stl + g.blk*W.blk + g.tov*W.tov) * 10) / 10;
-      games.push({ member_name: members[pi % 6], member_id: (pi % 6) + 1, game_date: day, player_name: name, team,
-        opponent: "", did_not_play: dnp, fantasy_points: fp, ...g });
-    });
-  });
-  return { members, days, games, rules: rules.map(([stat, weight, note]) => ({ stat, weight, note })) };
-}
-
-// ---------- 載入 ----------
-let STATE = { daily: [], leaderboard: [], days: [], rules: [], dayCache: {} };
-
-async function load() {
-  if (DEMO) {
-    $("demo-note").hidden = false;
-    const d = demoData();
-    const daily = {};
-    d.games.forEach((g) => {
-      const k = `${g.member_id}|${g.game_date}`;
-      daily[k] ??= { member_id: g.member_id, member_name: g.member_name, game_date: g.game_date, points: 0 };
-      daily[k].points += g.fantasy_points;
-    });
-    STATE.daily = Object.values(daily);
-    const latest = d.days[d.days.length - 1];
-    STATE.leaderboard = d.members.map((name, i) => {
-      const mine = STATE.daily.filter((x) => x.member_id === i + 1);
-      return { member_id: i + 1, member_name: name,
-        total_points: mine.reduce((a, b) => a + b.points, 0),
-        latest_day_points: mine.filter((x) => x.game_date === latest).reduce((a, b) => a + b.points, 0),
-        latest_day: latest };
-    }).sort((a, b) => b.total_points - a.total_points).map((r, i) => ({ ...r, rank: i + 1 }));
-    STATE.rules = d.rules;
-    d.days.forEach((day) => (STATE.dayCache[day] = d.games.filter((g) => g.game_date === day)));
-    $("meta").textContent = `示範資料 · 最新比賽日 ${latest}`;
-  } else {
-    const [lb, daily, rules, last] = await Promise.all([
-      api("leaderboard?select=*&order=rank.asc,member_name.asc"),
-      api("member_daily_scores?select=member_id,member_name,game_date,points&order=game_date.asc"),
-      api("scoring_rules?select=*&order=stat.asc"),
-      api("player_game_stats?select=updated_at&order=updated_at.desc&limit=1"),
-    ]);
-    STATE.leaderboard = lb; STATE.daily = daily; STATE.rules = rules;
-    const upd = last[0]?.updated_at ? new Date(last[0].updated_at).toLocaleString("zh-TW", { hour12: false }) : "尚無資料";
-    $("meta").textContent = `最新比賽日 ${lb[0]?.latest_day ?? "—"} · 更新於 ${upd}`;
+// PostgREST 一次最多回 1000 筆，季中資料會超過，所以分頁抓
+async function apiAll(path) {
+  const out = []; const sep = path.includes("?") ? "&" : "?";
+  for (let off = 0; ; off += 1000) {
+    const page = await api(`${path}${sep}limit=1000&offset=${off}`);
+    out.push(...page);
+    if (page.length < 1000) return out;
   }
-  STATE.days = [...new Set(STATE.daily.map((d) => d.game_date))].sort();
-  renderStandings(); renderRules(); setupDays();
+}
+async function rpc(fn, args) {
+  const r = await fetch(BASE + "rpc/" + fn, { method: "POST", headers: { ...HEADERS, "Content-Type": "application/json" }, body: JSON.stringify(args) });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) return { ok: false, error: body.message || `HTTP ${r.status}` };
+  return body;
 }
 
-// ---------- 排名 ----------
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; t.setAttribute("role", "status");
+  document.body.appendChild(t); setTimeout(() => t.remove(), 3200);
+}
+
+// ---------- 登入（每人一組密碼，存在這台裝置的瀏覽器裡） ----------
+let AUTH = null;
+try { AUTH = JSON.parse(localStorage.getItem("nbaf_auth") || "null"); } catch { AUTH = null; }
+const saveAuth = (a) => { AUTH = a; try { a ? localStorage.setItem("nbaf_auth", JSON.stringify(a)) : localStorage.removeItem("nbaf_auth"); } catch {} };
+const authArgs = () => ({ p_member: AUTH.member_id, p_pin: AUTH.pin });
+
+function renderWho() {
+  $("who").innerHTML = AUTH
+    ? `<span>目前身分：<b>${esc(AUTH.name)}</b></span><button class="btn sm" id="logout" type="button">登出</button>`
+    : `<span>登入後可以換人、交易和投票</span><button class="btn sm primary" id="login" type="button">登入</button>`;
+  if (AUTH) $("logout").onclick = () => { saveAuth(null); renderWho(); renderAll(); toast("已登出"); };
+  else $("login").onclick = openLogin;
+}
+
+function openLogin() {
+  const root = $("overlay-root");
+  root.innerHTML = `<div class="overlay" id="ov"><form class="dialog" id="login-form">
+      <h3>登入</h3>
+      <label>玩家<br><select class="inp" id="lg-member" style="width:100%">${S.members.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select></label>
+      <label>密碼<br><input class="inp" id="lg-pin" type="password" inputmode="numeric" autocomplete="current-password" style="width:100%" required></label>
+      <div class="err" id="lg-err"></div>
+      <div class="actions"><button class="btn primary" type="submit">登入</button><button class="btn" type="button" id="lg-cancel">取消</button></div>
+    </form></div>`;
+  const close = () => (root.innerHTML = "");
+  $("lg-cancel").onclick = close;
+  $("ov").onclick = (e) => { if (e.target.id === "ov") close(); };
+  $("lg-pin").focus();
+  $("login-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const member_id = +$("lg-member").value, pin = $("lg-pin").value;
+    const r = await rpc("login", { p_member: member_id, p_pin: pin });
+    if (!r.ok) { $("lg-err").textContent = r.error; return; }
+    saveAuth({ member_id, name: r.name, pin }); close(); renderWho(); renderAll(); toast(`歡迎，${r.name}`);
+  };
+}
+
+// ---------- 資料 ----------
+const S = { members: [], leaderboard: [], daily: [], weekly: [], rules: [], contrib: [], rosters: [], changes: [],
+            trades: [], items: [], votes: [], settings: {}, dayCache: {}, days: [], weeks: [] };
+const color = (memberId) => {
+  const i = S.members.findIndex((m) => m.id === memberId);
+  return getComputedStyle(document.documentElement).getPropertyValue(`--m${(i % 6) + 1}`).trim() || "#888";
+};
+const nameOf = (id) => S.members.find((m) => m.id === id)?.name ?? "?";
+
+async function loadCore() {
+  const [members, lb, daily, weekly, rules, settings, last] = await Promise.all([
+    api("members?select=id,name&order=id"),
+    api("leaderboard?select=*&order=rank.asc,member_id.asc"),
+    apiAll("member_daily_scores?select=member_id,member_name,game_date,points&order=game_date.asc,member_id.asc"),
+    apiAll("member_weekly_scores?select=*&order=week_start.asc,member_id.asc"),
+    api("scoring_rules?select=*&order=stat.asc"),
+    api("league_settings?select=key,value"),
+    api("player_game_stats?select=updated_at&order=updated_at.desc&limit=1"),
+  ]);
+  Object.assign(S, { members, leaderboard: lb, daily, weekly, rules });
+  S.settings = Object.fromEntries(settings.map((s) => [s.key, s.value]));
+  S.days = [...new Set(daily.map((d) => d.game_date))].sort();
+  S.weeks = [...new Set(weekly.map((w) => w.week_start))].sort();
+  const upd = last[0]?.updated_at ? new Date(last[0].updated_at).toLocaleString("zh-TW", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "尚無資料";
+  $("meta").textContent = `最新比賽日 ${lb[0]?.latest_day ?? "—"} · 數據更新於 ${upd}`;
+}
+async function loadTeams() {
+  const [rosters, changes] = await Promise.all([
+    api("team_rosters?select=*&order=member_id,slot,avg_fp.desc.nullslast"),
+    api("lineup_changes?select=*&order=created_at.desc&limit=200"),
+  ]);
+  Object.assign(S, { rosters, changes });
+}
+async function loadTrades() {
+  const [trades, items, votes] = await Promise.all([
+    api("trades?select=*&order=created_at.desc&limit=200"),
+    api("trade_items?select=*&order=trade_id,seq"),
+    api("trade_votes?select=*"),
+  ]);
+  Object.assign(S, { trades, items, votes });
+}
+
+// ---------- 排行榜 ----------
 function sparkline(memberId, maxTotal) {
-  const pts = STATE.days.map((day) => STATE.daily.find((d) => d.member_id === memberId && d.game_date === day)?.points ?? 0);
-  let run = 0; const cum = pts.map((p) => (run += +p));
-  const w = 120, h = 28, n = Math.max(cum.length - 1, 1);
+  let run = 0;
+  const cum = S.days.map((day) => (run += +(S.daily.find((d) => d.member_id === memberId && d.game_date === day)?.points ?? 0)));
   if (!cum.length) return "";
-  const xy = cum.map((v, i) => [ (i / n) * (w - 4) + 2, h - 2 - (maxTotal ? (v / maxTotal) * (h - 4) : 0) ]);
+  const w = 110, h = 26, n = Math.max(cum.length - 1, 1);
+  const xy = cum.map((v, i) => [(i / n) * (w - 4) + 2, h - 2 - (maxTotal ? (v / maxTotal) * (h - 4) : 0)]);
   const line = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
-  const area = `${line}L${xy.at(-1)[0].toFixed(1)},${h - 2}L${xy[0][0].toFixed(1)},${h - 2}Z`;
-  const [ex, ey] = xy.at(-1);
-  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
-    <path d="${area}" fill="var(--court)" fill-opacity=".12"></path>
-    <path d="${line}" fill="none" stroke="var(--court)" stroke-width="1.5"></path>
-    <circle cx="${ex}" cy="${ey}" r="2.5" fill="var(--court)"></circle></svg>`;
+  const [ex, ey] = xy.at(-1); const c = color(memberId);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${line}" fill="none" stroke="${c}" stroke-width="1.6"></path><circle cx="${ex}" cy="${ey}" r="2.6" fill="${c}"></circle></svg>`;
 }
 
 function renderStandings() {
-  const lb = STATE.leaderboard;
-  const top = +(lb[0]?.total_points ?? 0);
+  const lb = S.leaderboard, top = +(lb[0]?.total_points ?? 0);
   $("standings").innerHTML = lb.map((r) => `
     <tr class="${r.rank == 1 && top > 0 ? "leader" : ""}">
       <td class="rank num">${r.rank}</td>
-      <td class="member">${esc(r.member_name)}</td>
-      <td class="r total num">${fmt(+r.total_points)}</td>
-      <td class="r day num">${+r.latest_day_points ? "+" + fmt(+r.latest_day_points) : "—"}</td>
-      <td class="r gap num hide-sm">${r.rank == 1 ? "—" : "−" + fmt(top - +r.total_points)}</td>
+      <td><span class="dot" style="background:${color(r.member_id)}"></span><b>${esc(r.member_name)}</b></td>
+      <td class="r total num">${fmt(r.total_points)}</td>
+      <td class="r big num">${fmt(r.week_points)}</td>
+      <td class="r big num hide-sm">${+r.latest_day_points ? "+" + fmt(r.latest_day_points) : "—"}</td>
+      <td class="r num muted hide-sm">${r.rank == 1 ? "—" : "−" + fmt(top - +r.total_points)}</td>
       <td class="hide-sm">${sparkline(r.member_id, top)}</td>
-    </tr>`).join("") || `<tr><td colspan="6" class="empty">還沒有玩家。請先執行 seed_example.sql 建立玩家與陣容。</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="7" class="empty">還沒有玩家。</td></tr>`;
+  renderRules();
 }
 
-function renderRules() {
-  const names = { pts:"得分", reb:"籃板", oreb:"進攻籃板", dreb:"防守籃板", ast:"助攻", stl:"抄截", blk:"阻攻", tov:"失誤", pf:"犯規",
-    fgm:"投籃命中", fga:"投籃出手", fg3m:"三分命中", fg3a:"三分出手", ftm:"罰球命中", fta:"罰球出手", plus_minus:"正負值",
-    double_double:"大兩雙", triple_double:"大三元" };
-  $("rules").innerHTML = STATE.rules.filter((r) => +r.weight !== 0)
-    .map((r) => `<span>${esc(names[r.stat] ?? r.stat)} <b>${+r.weight > 0 ? "+" : ""}${+r.weight}</b></span>`).join("");
+let weekIdx = -1;
+function renderWeekly() {
+  if (weekIdx < 0) weekIdx = S.weeks.length - 1;
+  const ws = S.weeks[weekIdx];
+  $("wk-select").innerHTML = S.weeks.map((w, i) => `<option value="${i}">${md(w)} – ${md(addDays(w, 6))}</option>`).join("");
+  $("wk-select").value = String(weekIdx);
+  $("wk-prev").disabled = weekIdx <= 0; $("wk-next").disabled = weekIdx >= S.weeks.length - 1;
+  if (!ws) { $("weekly").innerHTML = `<tr><td colspan="5" class="empty">還沒有比賽數據。</td></tr>`; return; }
+  const rows = S.weekly.filter((w) => w.week_start === ws).sort((a, b) => a.week_rank - b.week_rank);
+  const days = S.days.filter((d) => d >= ws && d <= addDays(ws, 6));
+  $("weekly").innerHTML = rows.map((r) => {
+    const daily = days.map((d) => +(S.daily.find((x) => x.member_id === r.member_id && x.game_date === d)?.points ?? 0));
+    const mx = Math.max(1, ...S.daily.filter((x) => days.includes(x.game_date)).map((x) => +x.points));
+    const bars = daily.map((v, i) => `<i title="${md(days[i])}：${fmt(v)}" style="display:inline-block;width:12px;margin-right:2px;vertical-align:bottom;height:${Math.max(2, (v / mx) * 24)}px;background:${color(r.member_id)}"></i>`).join("");
+    return `<tr class="${r.week_rank == 1 && +r.points > 0 ? "leader" : ""}">
+      <td class="rank num">${r.week_rank}</td>
+      <td><span class="dot" style="background:${color(r.member_id)}"></span><b>${esc(r.member_name)}</b></td>
+      <td class="r total num">${fmt(r.points)}</td>
+      <td class="r num">${r.days_played}</td>
+      <td class="hide-sm" style="height:30px">${bars}</td></tr>`;
+  }).join("");
 }
+const addDays = (d, n) => { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
-// ---------- 每日 ----------
-let dayIdx = 0;
-function setupDays() {
-  const sel = $("day-select");
-  sel.innerHTML = STATE.days.map((d, i) => `<option value="${i}">${d}</option>`).join("");
-  dayIdx = Math.max(STATE.days.length - 1, 0);
-  sel.onchange = () => { dayIdx = +sel.value; showDay(); };
-  $("prev").onclick = () => { dayIdx--; showDay(); };
-  $("next").onclick = () => { dayIdx++; showDay(); };
-  showDay();
-}
-
-async function showDay() {
-  const day = STATE.days[dayIdx];
+let dayIdx = -1;
+async function renderDaily() {
+  if (dayIdx < 0) dayIdx = S.days.length - 1;
+  const day = S.days[dayIdx];
+  $("day-select").innerHTML = S.days.map((d, i) => `<option value="${i}">${d}</option>`).join("");
   $("day-select").value = String(dayIdx);
-  $("prev").disabled = dayIdx <= 0;
-  $("next").disabled = dayIdx >= STATE.days.length - 1;
-  if (!day) { $("boxes").innerHTML = `<div class="empty">還沒有比賽數據。第一次排程跑完後就會出現。</div>`; return; }
-  if (!STATE.dayCache[day]) {
+  $("day-prev").disabled = dayIdx <= 0; $("day-next").disabled = dayIdx >= S.days.length - 1;
+  if (!day) { $("boxes").innerHTML = `<div class="empty">還沒有比賽數據。</div>`; return; }
+  if (!S.dayCache[day]) {
     $("boxes").innerHTML = `<div class="empty">載入 ${day}…</div>`;
-    STATE.dayCache[day] = await api(`member_player_games?game_date=eq.${day}&select=member_id,member_name,player_name,team,opponent,did_not_play,minutes,pts,reb,ast,stl,blk,tov,fgm,fga,fantasy_points&order=fantasy_points.desc`);
+    S.dayCache[day] = await apiAll(`member_player_games?game_date=eq.${day}&select=member_id,member_name,player_name,team,opponent,did_not_play,pts,reb,ast,stl,blk,tov,fantasy_points&order=fantasy_points.desc`);
   }
-  const rows = STATE.dayCache[day];
-  const order = STATE.leaderboard.map((r) => r.member_name);
-  $("boxes").innerHTML = order.map((name) => {
-    const mine = rows.filter((r) => r.member_name === name).sort((a, b) => b.fantasy_points - a.fantasy_points);
+  const rows = S.dayCache[day];
+  $("boxes").innerHTML = S.leaderboard.map((m) => {
+    const mine = rows.filter((r) => r.member_id === m.member_id);
     const total = mine.reduce((a, b) => a + +b.fantasy_points, 0);
-    const body = mine.length ? `<div class="table-scroll" style="border:0"><table>
+    const body = mine.length ? `<div class="table-scroll"><table>
       <thead><tr><th>球員</th><th class="r">分</th><th class="r">板</th><th class="r">助</th><th class="r">抄</th><th class="r">阻</th><th class="r">失</th><th class="r">FP</th></tr></thead>
       <tbody>${mine.map((p) => p.did_not_play
         ? `<tr class="dnp"><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span></td><td colspan="6">未上場</td><td class="r fp num">0.0</td></tr>`
         : `<tr><td class="player">${esc(p.player_name)} <span class="tm">${esc(p.team)}</span></td>
             <td class="r num">${p.pts}</td><td class="r num">${p.reb}</td><td class="r num">${p.ast}</td>
             <td class="r num">${p.stl}</td><td class="r num">${p.blk}</td><td class="r num">${p.tov}</td>
-            <td class="r fp num">${fmt(+p.fantasy_points)}</td></tr>`).join("")}</tbody></table></div>`
-      : `<div class="empty">這天陣中沒有球員出賽</div>`;
-    return `<article class="box"><div class="box-head"><span class="name">${esc(name)}</span><span class="pts num">${fmt(total)}</span></div>${body}</article>`;
+            <td class="r fp num">${fmt(p.fantasy_points)}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">這天先發球員都沒有比賽</div>`;
+    return `<article class="panel box"><div class="box-head"><span class="name"><span class="dot" style="background:${color(m.member_id)}"></span>${esc(m.member_name)}</span><span class="pts num">${fmt(total)}</span></div>${body}</article>`;
   }).join("");
 }
 
-load().catch((e) => { $("meta").textContent = e.message; });
+function renderRules() {
+  const names = { pts: "得分", reb: "籃板", oreb: "進攻籃板", dreb: "防守籃板", ast: "助攻", stl: "抄截", blk: "阻攻", tov: "失誤", pf: "犯規",
+    fgm: "投籃命中", fga: "投籃出手", fg3m: "三分命中", fg3a: "三分出手", ftm: "罰球命中", fta: "罰球出手", plus_minus: "正負值", double_double: "大兩雙", triple_double: "大三元" };
+  $("rules").innerHTML = S.rules.filter((r) => +r.weight !== 0)
+    .map((r) => `<span>${esc(names[r.stat] ?? r.stat)} <b>${+r.weight > 0 ? "+" : ""}${+r.weight}</b></span>`).join("");
+}
+
+// ---------- 圖表 ----------
+const charts = {};
+function chartTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  return { ink: cs.getPropertyValue("--muted").trim(), grid: cs.getPropertyValue("--line").trim() };
+}
+function mkChart(id, config) {
+  charts[id]?.destroy();
+  const t = chartTheme();
+  Chart.defaults.color = t.ink;
+  Chart.defaults.borderColor = t.grid;
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  charts[id] = new Chart($(id), config);
+}
+async function renderCharts() {
+  if (typeof Chart === "undefined") { $("c-contrib").innerHTML = `<div class="empty">圖表元件載入失敗，請重新整理頁面。</div>`; return; }
+  const mem = S.leaderboard.map((r) => ({ id: r.member_id, name: r.member_name }));
+  const base = { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+    plugins: { legend: { position: "bottom", labels: { boxWidth: 10, boxHeight: 10 } } } };
+
+  // 累積
+  mkChart("c-cum", { type: "line", data: { labels: S.days.map(md), datasets: mem.map((m) => {
+    let run = 0;
+    return { label: m.name, borderColor: color(m.id), backgroundColor: color(m.id), borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .25,
+      data: S.days.map((d) => (run += +(S.daily.find((x) => x.member_id === m.id && x.game_date === d)?.points ?? 0))) };
+  }) }, options: { ...base, scales: { y: { beginAtZero: true } } } });
+
+  // 每週
+  const wl = S.weeks.map((w) => md(w));
+  mkChart("c-week", { type: "bar", data: { labels: wl, datasets: mem.map((m) => ({ label: m.name, backgroundColor: color(m.id),
+    data: S.weeks.map((w) => +(S.weekly.find((x) => x.member_id === m.id && x.week_start === w)?.points ?? 0)) })) },
+    options: { ...base, scales: { y: { beginAtZero: true } } } });
+
+  // 排名
+  mkChart("c-rank", { type: "line", data: { labels: wl, datasets: mem.map((m) => ({ label: m.name, borderColor: color(m.id), backgroundColor: color(m.id), borderWidth: 2.5, pointRadius: 4,
+    data: S.weeks.map((w) => S.weekly.find((x) => x.member_id === m.id && x.week_start === w)?.week_rank ?? null) })) },
+    options: { ...base, scales: { y: { reverse: true, min: 1, max: Math.max(mem.length, 2), ticks: { stepSize: 1 } } } } });
+
+  // 熱力圖
+  const days = S.days.slice(-28);
+  const mx = Math.max(1, ...S.daily.filter((d) => days.includes(d.game_date)).map((d) => +d.points));
+  const heat = $("c-heat");
+  heat.style.gridTemplateColumns = `auto repeat(${days.length}, minmax(22px, 1fr))`;
+  heat.innerHTML = `<span></span>${days.map((d) => `<span class="hd">${md(d)}</span>`).join("")}` +
+    mem.map((m) => `<span class="lbl">${esc(m.name)}</span>` + days.map((d) => {
+      const v = +(S.daily.find((x) => x.member_id === m.id && x.game_date === d)?.points ?? 0);
+      const a = v ? 0.15 + 0.85 * (v / mx) : 0;
+      return `<span class="cell" title="${esc(m.name)} ${md(d)}：${fmt(v)}" style="background:color-mix(in srgb, ${color(m.id)} ${Math.round(a * 100)}%, var(--chip))">${v ? Math.round(v) : ""}</span>`;
+    }).join("")).join("");
+  if (!days.length) heat.innerHTML = `<div class="empty">還沒有比賽數據。</div>`;
+
+  // 貢獻
+  if (!S.contrib.length) S.contrib = await apiAll("member_player_contrib?select=*&order=points.desc");
+  $("c-contrib").innerHTML = mem.map((m) => {
+    const ps = S.contrib.filter((c) => c.member_id === m.id).sort((a, b) => b.points - a.points);
+    const total = ps.reduce((a, b) => a + +b.points, 0);
+    if (!total) return `<div class="contrib-row"><b>${esc(m.name)}</b><div class="contrib-bar"></div><span class="num r">0.0</span></div>`;
+    const top = ps.slice(0, 5), rest = total - top.reduce((a, b) => a + +b.points, 0);
+    const seg = (label, v, op) => `<span title="${esc(label)}：${fmt(v)}（${Math.round((v / total) * 100)}%）" style="width:${(v / total) * 100}%;background:color-mix(in srgb, ${color(m.id)} ${op}%, var(--muted))">${esc(label)}</span>`;
+    return `<div class="contrib-row"><b style="font-size:14px">${esc(m.name)}</b><div class="contrib-bar">${top.map((p, i) => seg(p.player_name.split(" ").slice(-1)[0], +p.points, 100 - i * 14)).join("")}${rest > 0 ? seg("其他", rest, 25) : ""}</div><span class="num big" style="text-align:right">${fmt(total)}</span></div>`;
+  }).join("");
+}
+
+// ---------- 球隊與傷兵 ----------
+function injChip(p) {
+  if (!p.injury_status) return `<span class="chip ok">健康</span>`;
+  const cls = p.injury_status === "Out" ? "out" : p.injury_status === "Suspension" ? "susp" : "dtd";
+  const label = { "Out": "缺陣", "Day-To-Day": "每日觀察", "Suspension": "禁賽" }[p.injury_status] ?? p.injury_status;
+  return `<span class="chip ${cls}" title="${esc(p.injury_comment || "")}">${label}${p.injury_type ? "・" + esc(p.injury_type) : ""}</span>`;
+}
+
+let teamSel = null, swapOpen = null;
+function renderTeam() {
+  // 聯盟傷兵
+  const hurt = S.rosters.filter((p) => p.injury_status);
+  $("inj-league").innerHTML = hurt.length ? hurt.sort((a, b) => a.member_id - b.member_id).map((p) => `
+    <div class="inj-item">
+      <div>${injChip(p)}</div>
+      <div><b>${esc(p.player_name)}</b> <span class="tm">${esc(p.team || "")}</span> · <span class="dot" style="background:${color(p.member_id)};margin-right:4px"></span>${esc(p.member_name)}・${p.slot === "active" ? "<b>先發</b>" : "替補"}
+        ${p.return_date ? `<span class="muted">・預計 ${md(p.return_date)} 回歸</span>` : ""}
+        ${p.injury_comment ? `<div class="muted" style="font-size:12px">${esc(p.injury_comment)}</div>` : ""}</div>
+    </div>`).join("") : `<div class="muted" style="font-size:13px">目前各隊都沒有傷兵。</div>`;
+
+  if (teamSel == null) teamSel = AUTH?.member_id ?? S.members[0]?.id;
+  $("team-select").innerHTML = S.members.map((m) => `<option value="${m.id}">${esc(m.name)}${AUTH?.member_id === m.id ? "（我）" : ""}</option>`).join("");
+  $("team-select").value = String(teamSel);
+  const mine = AUTH && AUTH.member_id === teamSel;
+  const team = S.rosters.filter((p) => p.member_id === teamSel);
+  const active = team.filter((p) => p.slot === "active"), bench = team.filter((p) => p.slot === "bench");
+  const hurtStarters = active.filter((p) => p.injury_status);
+  const returning = bench.filter((p) => p.injury_benched && !p.injury_status);
+
+  $("team-note").innerHTML = mine
+    ? (hurtStarters.length ? `你有 <b>${hurtStarters.length}</b> 位先發受傷，可以點「換下」跟替補互換，明天生效。`
+       : returning.length ? `因傷下場的 <b>${esc(returning.map((p) => p.player_name).join("、"))}</b> 已經康復，可以換回先發。`
+       : `先發都健康。只有先發受傷時才能跟替補互換。`)
+    : (AUTH ? `正在看 ${esc(nameOf(teamSel))} 的球隊。` : `登入後可以管理自己的球隊。`);
+
+  const row = (p) => {
+    const pending = p.today_slot && p.today_slot !== p.slot ? `<span class="chip next">明天起${p.slot === "active" ? "先發" : "替補"}</span>`
+                  : !p.today_slot ? `<span class="chip next">明天加入</span>` : "";
+    let act = "";
+    if (mine) {
+      const canOut = p.slot === "active" && p.injury_status && bench.length;
+      const canBack = p.slot === "bench" && p.injury_benched && !p.injury_status;
+      if (swapOpen === p.player_id) {
+        const opts = (p.slot === "active" ? bench : active).map((o) => `<option value="${esc(o.player_id)}">${esc(o.player_name)}${o.injury_status ? "（傷）" : ""}</option>`).join("");
+        act = `<div class="swap-box"><select class="inp" id="swap-with" aria-label="交換對象">${opts}</select>
+          <button class="btn sm go" type="button" data-swap="${esc(p.player_id)}" data-slot="${p.slot}">確認</button>
+          <button class="btn sm" type="button" data-swap-cancel>取消</button></div>`;
+      } else if (canOut) act = `<button class="btn sm" type="button" data-swap-open="${esc(p.player_id)}">換下</button>`;
+      else if (canBack) act = `<button class="btn sm" type="button" data-swap-open="${esc(p.player_id)}">換回先發</button>`;
+    }
+    return `<tr class="${p.injury_status && p.slot === "active" ? "hurt" : ""}">
+      <td><div class="pl"><img src="${esc(p.headshot || "")}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+        <div><div class="nm">${esc(p.player_name)}</div><div class="meta">${esc(p.team || "—")} · ${esc(p.position || "—")} ${pending}</div></div></div></td>
+      <td class="r big num">${p.avg_fp != null ? fmt(p.avg_fp) : "—"}</td>
+      <td class="r num hide-sm">${p.games}</td>
+      <td>${injChip(p)}${p.return_date && p.injury_status ? `<div class="tm">預計 ${md(p.return_date)}</div>` : ""}</td>
+      <td class="r">${act}</td></tr>`;
+  };
+  $("roster-active").innerHTML = active.map(row).join("") || `<tr><td colspan="5" class="empty">還沒有先發球員</td></tr>`;
+  $("roster-bench").innerHTML = bench.map(row).join("") || `<tr><td colspan="5" class="empty">沒有替補</td></tr>`;
+
+  const ch = S.changes.filter((c) => c.member_id === teamSel);
+  $("changes").innerHTML = ch.map((c) => `<tr><td class="num">${c.effective_date}</td><td>${esc(c.out_player)}</td><td>${esc(c.in_player)}</td>
+    <td>${c.reason === "injury" ? "先發受傷" : "傷癒回歸"}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">還沒有換人紀錄</td></tr>`;
+}
+
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.swapOpen) { swapOpen = t.dataset.swapOpen; renderTeam(); return; }
+  if (t.hasAttribute("data-swap-cancel")) { swapOpen = null; renderTeam(); return; }
+  if (t.dataset.swap) {
+    const other = $("swap-with").value;
+    const [outP, inP] = t.dataset.slot === "active" ? [t.dataset.swap, other] : [other, t.dataset.swap];
+    t.disabled = true;
+    const r = await rpc("swap_players", { ...authArgs(), p_out_player: outP, p_in_player: inP });
+    if (!r.ok) { toast(r.error); t.disabled = false; return; }
+    swapOpen = null; await loadTeams(); renderTeam(); toast(`已換人，${md(r.effective_date)} 起生效`);
+  }
+});
+
+// ---------- 交易區 ----------
+const needed = () => +(S.settings.trade_approvals_needed ?? 2);
+let tradeTo = null, giveSel = [], getSel = [];
+const STATUS = { pending: "等待對方回覆", voting: "投票中", approved: "已成交", rejected: "投票否決", declined: "對方拒絕", cancelled: "已取消", failed: "失效（球員已不在隊上）" };
+
+function renderTradeForm() {
+  const box = $("trade-new");
+  if (!AUTH) { box.innerHTML = `<h2>發起交易</h2><div class="panel empty">登入後可以發起交易、回覆交易和投票。</div>`; return; }
+  const others = S.members.filter((m) => m.id !== AUTH.member_id);
+  if (tradeTo == null || !others.some((m) => m.id === tradeTo)) tradeTo = others[0]?.id;
+  const mine = S.rosters.filter((p) => p.member_id === AUTH.member_id);
+  const theirs = S.rosters.filter((p) => p.member_id === tradeTo);
+  const list = (ps, sel, key) => ps.map((p) => {
+    const ord = sel.indexOf(p.player_id);
+    return `<label><input type="checkbox" data-pick="${key}" value="${esc(p.player_id)}" ${ord >= 0 ? "checked" : ""}>
+      <span>${ord >= 0 ? `<span class="ord">${ord + 1}</span> ` : ""}<b>${esc(p.player_name)}</b> <span class="tm">${esc(p.team || "")} · ${p.slot === "active" ? "先發" : "替補"}</span> ${p.injury_status ? injChip(p) : ""}</span>
+      <span class="num muted">${p.avg_fp != null ? fmt(p.avg_fp) : "—"}</span></label>`;
+  }).join("");
+  const pairs = Array.from({ length: Math.max(giveSel.length, getSel.length) }, (_, i) => {
+    const a = mine.find((p) => p.player_id === giveSel[i]), b = theirs.find((p) => p.player_id === getSel[i]);
+    return `<div class="pair"><span class="side">${a ? esc(a.player_name) : "<span class='muted'>（選一位）</span>"}</span><span class="arrow">⇄</span><span class="side">${b ? esc(b.player_name) : "<span class='muted'>（選一位）</span>"}</span></div>`;
+  }).join("");
+  const valid = giveSel.length > 0 && giveSel.length === getSel.length;
+  box.innerHTML = `<h2>發起交易 <span class="sub">對方同意後，由其他 ${S.members.length - 2} 人投票，${needed()} 票同意就成交</span></h2>
+    <div class="panel panel-pad" style="display:grid;gap:14px">
+      <div class="form-row"><span>交易對象</span><select class="inp" id="trade-to">${others.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select>
+        <span class="muted" style="font-size:13px">依勾選順序配對，換過去的球員接手對方原本的先發或替補位置</span></div>
+      <div class="picker">
+        <div><div class="muted" style="font-size:13px;margin-bottom:4px">我送出</div><div class="pick-list panel">${list(mine, giveSel, "give")}</div></div>
+        <div><div class="muted" style="font-size:13px;margin-bottom:4px">我想要（${esc(nameOf(tradeTo))}）</div><div class="pick-list panel">${list(theirs, getSel, "get")}</div></div>
+      </div>
+      ${pairs ? `<div class="pairs">${pairs}</div>` : ""}
+      <div class="form-row"><input class="inp" id="trade-msg" placeholder="給對方的話（選填）" maxlength="200" style="flex:1;min-width:200px">
+        <button class="btn primary" id="trade-send" type="button" ${valid ? "" : "disabled"}>送出交易提議</button></div>
+      ${!valid && (giveSel.length || getSel.length) ? `<div class="muted" style="font-size:13px">雙方人數要相同</div>` : ""}
+    </div>`;
+  $("trade-to").value = String(tradeTo);
+  $("trade-to").onchange = (e) => { tradeTo = +e.target.value; getSel = []; renderTradeForm(); };
+  box.querySelectorAll("[data-pick]").forEach((cb) => cb.onchange = () => {
+    const arr = cb.dataset.pick === "give" ? giveSel : getSel;
+    const i = arr.indexOf(cb.value); i >= 0 ? arr.splice(i, 1) : arr.push(cb.value);
+    renderTradeForm();
+  });
+  $("trade-send").onclick = async () => {
+    $("trade-send").disabled = true;
+    const r = await rpc("propose_trade", { ...authArgs(), p_to_member: tradeTo, p_give: giveSel, p_get: getSel, p_message: $("trade-msg").value || null });
+    if (!r.ok) { toast(r.error); $("trade-send").disabled = false; return; }
+    giveSel = []; getSel = []; await loadTrades(); renderTrades(); toast("交易提議已送出");
+  };
+}
+
+function tradeCard(t) {
+  const its = S.items.filter((i) => i.trade_id === t.id);
+  const seqs = [...new Set(its.map((i) => i.seq))];
+  const pairs = seqs.map((s) => {
+    const a = its.find((i) => i.seq === s && i.from_member_id === t.proposer_id), b = its.find((i) => i.seq === s && i.from_member_id === t.receiver_id);
+    return `<div class="pair"><span class="side">${esc(a?.player_name)}</span><span class="arrow">⇄</span><span class="side">${esc(b?.player_name)}</span></div>`;
+  }).join("");
+  const vs = S.votes.filter((v) => v.trade_id === t.id), yes = vs.filter((v) => v.approve), no = vs.filter((v) => !v.approve);
+  const voters = S.members.length - 2;
+  const bar = Array.from({ length: voters }, (_, i) => `<i class="${i < yes.length ? "y" : i >= voters - no.length ? "n" : ""}"></i>`).join("");
+  const me = AUTH?.member_id, party = me === t.proposer_id || me === t.receiver_id, myVote = vs.find((v) => v.member_id === me);
+  let actions = "";
+  if (AUTH && t.status === "pending" && me === t.receiver_id)
+    actions = `<button class="btn go" data-tr="accept" data-id="${t.id}">接受，送交投票</button><button class="btn no" data-tr="decline" data-id="${t.id}">拒絕</button>`;
+  if (AUTH && ["pending", "voting"].includes(t.status) && me === t.proposer_id)
+    actions += `<button class="btn" data-tr="cancel" data-id="${t.id}">取消提議</button>`;
+  if (AUTH && t.status === "voting" && !party)
+    actions = `<button class="btn go" data-tr="yes" data-id="${t.id}" ${myVote?.approve === true ? "disabled" : ""}>同意</button>
+      <button class="btn no" data-tr="no" data-id="${t.id}" ${myVote?.approve === false ? "disabled" : ""}>反對</button>
+      ${myVote ? `<span class="muted" style="font-size:13px">你投了${myVote.approve ? "同意" : "反對"}，可以改票</span>` : ""}`;
+  const chipCls = { approved: "ok", rejected: "out", declined: "susp", cancelled: "", failed: "susp", voting: "dtd", pending: "next" }[t.status];
+  return `<article class="panel trade">
+    <div class="trade-top">
+      <div><span class="dot" style="background:${color(t.proposer_id)}"></span><b>${esc(nameOf(t.proposer_id))}</b> <span class="muted">⇄</span>
+        <span class="dot" style="background:${color(t.receiver_id)};margin-left:4px"></span><b>${esc(nameOf(t.receiver_id))}</b></div>
+      <div><span class="chip ${chipCls}">${STATUS[t.status]}</span> <span class="tm">${new Date(t.created_at).toLocaleDateString("zh-TW")}${t.effective_date ? `・${md(t.effective_date)} 生效` : ""}</span></div>
+    </div>
+    <div class="pairs">${pairs}</div>
+    ${t.message ? `<div class="muted" style="font-size:13px">「${esc(t.message)}」</div>` : ""}
+    ${["voting", "approved", "rejected"].includes(t.status) ? `<div class="form-row" style="font-size:13px"><div class="votebar">${bar}</div>
+      <span>同意 ${yes.length} / 需要 ${needed()}・反對 ${no.length}</span>
+      <span class="muted">${vs.map((v) => `${esc(nameOf(v.member_id))}${v.approve ? "✓" : "✗"}`).join("　")}</span></div>` : ""}
+    ${actions ? `<div class="actions">${actions}</div>` : ""}
+  </article>`;
+}
+
+function renderTrades() {
+  renderTradeForm();
+  const open = S.trades.filter((t) => ["pending", "voting"].includes(t.status));
+  const done = S.trades.filter((t) => !["pending", "voting"].includes(t.status));
+  $("trades-open").innerHTML = open.map(tradeCard).join("") || `<div class="panel empty">目前沒有進行中的交易。</div>`;
+  $("trades-done").innerHTML = done.map(tradeCard).join("") || `<div class="panel empty">還沒有交易紀錄。</div>`;
+  updateBadge();
+}
+function updateBadge() {
+  const me = AUTH?.member_id;
+  const todo = !me ? 0 : S.trades.filter((t) => (t.status === "pending" && t.receiver_id === me) ||
+    (t.status === "voting" && me !== t.proposer_id && me !== t.receiver_id && !S.votes.some((v) => v.trade_id === t.id && v.member_id === me))).length;
+  const a = document.querySelector('nav.tabs a[href="#trades"]');
+  a.innerHTML = `交易區${todo ? `<span class="badge">${todo}</span>` : ""}`;
+}
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-tr]"); if (!b || !AUTH) return;
+  const id = +b.dataset.id, act = b.dataset.tr; b.disabled = true;
+  const r = act === "accept" || act === "decline" ? await rpc("respond_trade", { ...authArgs(), p_trade: id, p_accept: act === "accept" })
+          : act === "cancel" ? await rpc("cancel_trade", { ...authArgs(), p_trade: id })
+          : await rpc("vote_trade", { ...authArgs(), p_trade: id, p_approve: act === "yes" });
+  if (!r.ok) { toast(r.error); b.disabled = false; return; }
+  await loadTrades();
+  if (r.status === "approved") { await loadTeams(); toast("交易成立！隔天生效"); }
+  else toast({ voting: "已送出", declined: "已拒絕", cancelled: "已取消", rejected: "交易被否決" }[r.status] || "已更新");
+  renderTrades();
+});
+
+// ---------- 路由 ----------
+const VIEWS = ["standings", "charts", "team", "trades"];
+function currentView() { const h = location.hash.slice(1); return VIEWS.includes(h) ? h : "standings"; }
+function renderAll() {
+  const v = currentView();
+  VIEWS.forEach((x) => ($("v-" + x).hidden = x !== v));
+  document.querySelectorAll("nav.tabs a").forEach((a) => a.setAttribute("aria-current", a.getAttribute("href") === "#" + v ? "page" : "false"));
+  if (v === "standings") { renderStandings(); renderWeekly(); renderDaily(); }
+  if (v === "charts") renderCharts();
+  if (v === "team") renderTeam();
+  if (v === "trades") renderTrades();
+  updateBadge();
+}
+window.addEventListener("hashchange", () => { swapOpen = null; renderAll(); });
+$("team-select").onchange = (e) => { teamSel = +e.target.value; swapOpen = null; renderTeam(); };
+$("wk-select").onchange = (e) => { weekIdx = +e.target.value; renderWeekly(); };
+$("wk-prev").onclick = () => { weekIdx--; renderWeekly(); };
+$("wk-next").onclick = () => { weekIdx++; renderWeekly(); };
+$("day-select").onchange = (e) => { dayIdx = +e.target.value; renderDaily(); };
+$("day-prev").onclick = () => { dayIdx--; renderDaily(); };
+$("day-next").onclick = () => { dayIdx++; renderDaily(); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { if (currentView() === "charts") renderCharts(); });
+
+(async () => {
+  try {
+    await Promise.all([loadCore(), loadTeams(), loadTrades()]);
+    renderWho(); renderAll();
+  } catch (err) { $("meta").textContent = err.message; }
+})();
 </script>
 </body>
 </html>
