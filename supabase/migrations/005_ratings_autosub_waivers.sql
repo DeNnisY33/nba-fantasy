@@ -67,14 +67,15 @@ begin
     select ri.source_name, ri.team_slug, p.player_id,
            row_number() over (partition by ri.source_name, ri.team_slug
                               order by (norm_name(p.name) = norm_name(ri.source_name)) desc,
-                                       (p.team = map.abbr) desc, p.player_id) as rk
+                                       (p.team = map.abbr) desc,
+                                       (left(norm_name(p.name), 1) = left(norm_name(ri.source_name), 1)) desc,
+                                       p.player_id) as rk
     from rating_imports ri
     join map on map.slug = ri.team_slug
     join players p on
          norm_name(p.name) = norm_name(ri.source_name)
-      or (p.team = map.abbr
-          and split_part(norm_name(p.name), ' ', -1) = split_part(norm_name(ri.source_name), ' ', -1)
-          and left(norm_name(p.name), 1) = left(norm_name(ri.source_name), 1))
+      or (p.team = map.abbr   -- 同隊同姓（處理綽號，例如 Carlton / Bub Carrington）
+          and split_part(norm_name(p.name), ' ', -1) = split_part(norm_name(ri.source_name), ' ', -1))
     where ri.snapshot_date = p_snapshot
   )
   update rating_imports ri set player_id = c.player_id
