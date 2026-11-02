@@ -480,6 +480,7 @@ function renderWeekly() {
       <td class="hide-sm" style="height:30px">${bars}</td></tr>`;
   }).join("");
 }
+const lastName = (n) => String(n).split(" ").filter((w) => !/^(Jr\.?|Sr\.?|II|III|IV)$/i.test(w)).slice(-1)[0] || n;
 const addDays = (d, n) => { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
 let dayIdx = -1;
@@ -577,7 +578,7 @@ async function renderCharts() {
     if (!total) return `<div class="contrib-row"><b>${esc(m.name)}</b><div class="contrib-bar"></div><span class="num r">0.0</span></div>`;
     const top = ps.slice(0, 5), rest = total - top.reduce((a, b) => a + +b.points, 0);
     const seg = (label, v, op) => `<span title="${esc(label)}：${fmt(v)}（${Math.round((v / total) * 100)}%）" style="width:${(v / total) * 100}%;background:color-mix(in srgb, ${color(m.id)} ${op}%, var(--muted))">${esc(label)}</span>`;
-    return `<div class="contrib-row"><b style="font-size:14px">${esc(m.name)}</b><div class="contrib-bar">${top.map((p, i) => seg(p.player_name.split(" ").slice(-1)[0], +p.points, 100 - i * 14)).join("")}${rest > 0 ? seg("其他", rest, 25) : ""}</div><span class="num big" style="text-align:right">${fmt(total)}</span></div>`;
+    return `<div class="contrib-row"><b style="font-size:14px">${esc(m.name)}</b><div class="contrib-bar">${top.map((p, i) => seg(lastName(p.player_name), +p.points, 100 - i * 14)).join("")}${rest > 0 ? seg("其他", rest, 25) : ""}</div><span class="num big" style="text-align:right">${fmt(total)}</span></div>`;
   }).join("");
 }
 
