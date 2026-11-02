@@ -40,10 +40,16 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           if [ -n "${{ inputs.date }}" ]; then
-            python scripts/fetch_stats.py --date "${{ inputs.date }}"
+            python scripts/fetch_stats.py --job stats --date "${{ inputs.date }}"
           else
-            python scripts/fetch_stats.py --days "${{ inputs.days || '2' }}"
+            python scripts/fetch_stats.py --job stats --days "${{ inputs.days || '2' }}"
           fi
+
+      - name: Refresh player directory & injuries
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/fetch_stats.py --job players --job injuries
 
   keepalive:
     # 公開 repo 60 天沒活動，GitHub 會停用排程；這個 job 用 API 保持啟用（不會產生 commit）

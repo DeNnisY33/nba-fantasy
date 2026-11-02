@@ -1,0 +1,27 @@
+name: Injury report
+
+on:
+  schedule:
+    # 每 2 小時更新一次傷兵名單，讓換人判斷用的是最新狀態（UTC 偶數小時的 :37 分）
+    - cron: "37 */2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  injuries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Sync injuries
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/fetch_stats.py --job injuries

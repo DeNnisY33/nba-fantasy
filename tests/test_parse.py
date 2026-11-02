@@ -72,6 +72,29 @@ def main():
         assert r["did_not_play"] or r["pts"] == 2 * r["fgm"] + r["fg3m"] + r["ftm"], r
     print("parse_summary (real ESPN 2026-11-01): all checks passed")
 
+    # 傷兵：結構取自 2026-11-02 的 ESPN 回應（athlete 沒有 id，要從連結解析）
+    from fetch_stats import parse_injuries, parse_roster
+    inj = {"injuries": [{"id": "1", "displayName": "Atlanta Hawks", "injuries": [
+        {"status": "Day-To-Day", "date": "2026-11-01T22:28Z",
+         "shortComment": "Johnson (ankle) is questionable to play Monday.",
+         "athlete": {"displayName": "Jalen Johnson",
+                     "links": [{"href": "https://www.espn.com/nba/player/_/id/4701230/jalen-johnson"}]},
+         "details": {"fantasyStatus": {"abbreviation": "GTD"}, "type": "Ankle", "returnDate": "2026-11-02"}},
+        {"status": "Out", "athlete": {"displayName": "No Link Guy", "links": []}, "details": {}},
+    ]}]}
+    rows = parse_injuries(inj, {"Atlanta Hawks": "ATL"})
+    assert len(rows) == 1, rows
+    r = rows[0]
+    assert (r["player_id"], r["team"], r["status"], r["fantasy_status"], r["injury_type"], r["return_date"]) == \
+        ("4701230", "ATL", "Day-To-Day", "GTD", "Ankle", "2026-11-02"), r
+
+    ros = {"athletes": [{"id": "3945274", "displayName": "Luka Doncic", "position": {"abbreviation": "G"},
+                         "headshot": {"href": "https://a.espncdn.com/i/headshots/nba/players/full/3945274.png"}}]}
+    pr = parse_roster(ros, "LAL")
+    assert pr == [{"player_id": "3945274", "name": "Luka Doncic", "team": "LAL", "position": "G",
+                   "headshot": "https://a.espncdn.com/i/headshots/nba/players/full/3945274.png"}], pr
+    print("parse_injuries / parse_roster: all checks passed")
+
 
 if __name__ == "__main__":
     main()

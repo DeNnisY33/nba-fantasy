@@ -6,6 +6,9 @@
   python scripts/fetch_stats.py --date 2026-11-01  # 只抓指定日期
   python scripts/fetch_stats.py --days 7           # 補抓最近 7 天
   python scripts/fetch_stats.py --dry-run          # 只抓資料印出來，不寫資料庫
+  python scripts/fetch_stats.py --job players      # 更新 30 隊球員名單
+  python scripts/fetch_stats.py --job injuries     # 更新傷兵名單
+  python scripts/fetch_stats.py --job stats --job players   # 一次跑多個
 
 需要的環境變數（--dry-run 時不需要）：
   SUPABASE_URL          例如 https://xxxx.supabase.co
@@ -17,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -135,31 +139,100 @@ def parse_summary(summary: dict, game_id: str, game_date: date) -> list[dict]:
     return rows
 
 
+# ---------------------------------------------------------------- 球員名單 / 傷兵
+
+def list_teams() -> list[dict]:
+    data = http_get_json(f"{ESPN_BASE}/teams")
+    teams = (((data.get("sports") or [{}])[0].get("leagues") or [{}])[0].get("teams")) or []
+    return [{"id": str(t["team"]["id"]), "abbr": t["team"].get("abbreviation", ""),
+             "name": t["team"].get("displayName", "")} for t in teams]
+
+
+def parse_roster(roster: dict, team_abbr: str) -> list[dict]:
+    rows = []
+    for a in roster.get("athletes") or []:
+        if not a.get("id"):
+            continue
+        rows.append({
+            "player_id": str(a["id"]),
+            "name": a.get("displayName") or a.get("fullName") or str(a["id"]),
+            "team": team_abbr,
+            "position": (a.get("position") or {}).get("abbreviation"),
+            "headshot": (a.get("headshot") or {}).get("href"),
+        })
+    return rows
+
+
+_ID_RE = re.compile(r"/id/(\d+)")
+
+
+def parse_injuries(data: dict, team_abbr_by_name: dict[str, str]) -> list[dict]:
+    """ESPN 傷兵資料裡的 athlete 沒有 id 欄位，要從球員頁連結解析。"""
+    rows = []
+    for team in data.get("injuries") or []:
+        abbr = team_abbr_by_name.get(team.get("displayName", ""), "")
+        for inj in team.get("injuries") or []:
+            ath = inj.get("athlete") or {}
+            pid = str(ath.get("id") or "")
+            if not pid:
+                for link in ath.get("links") or []:
+                    m = _ID_RE.search(link.get("href", ""))
+                    if m:
+                        pid = m.group(1)
+                        break
+            if not pid:
+                continue
+            det = inj.get("details") or {}
+            rows.append({
+                "player_id": pid,
+                "player_name": ath.get("displayName") or pid,
+                "team": abbr,
+                "status": inj.get("status") or "Unknown",
+                "fantasy_status": (det.get("fantasyStatus") or {}).get("abbreviation"),
+                "injury_type": det.get("type"),
+                "return_date": det.get("returnDate") or "",
+                "comment": inj.get("shortComment"),
+                "reported_at": inj.get("date") or "",
+            })
+    return rows
+
+
 # ---------------------------------------------------------------- Supabase
 
-def upsert_stats(rows: list[dict]) -> None:
+def _sb():
     url = os.environ["SUPABASE_URL"].rstrip("/")
     key = os.environ["SUPABASE_SERVICE_KEY"]
+    return url, {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+
+def sb_upsert(table: str, rows: list[dict], on_conflict: str) -> None:
+    url, headers = _sb()
     now = datetime.now(timezone.utc).isoformat()
     for r in rows:
         r["updated_at"] = now
-    resp = requests.post(
-        f"{url}/rest/v1/player_game_stats",
-        params={"on_conflict": "game_id,player_id"},
-        headers={
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
-        data=json.dumps(rows),
-        timeout=30,
-    )
+    for i in range(0, len(rows), 500):
+        resp = requests.post(
+            f"{url}/rest/v1/{table}", params={"on_conflict": on_conflict},
+            headers={**headers, "Prefer": "resolution=merge-duplicates,return=minimal"},
+            data=json.dumps(rows[i:i + 500]), timeout=30,
+        )
+        if resp.status_code >= 300:
+            raise RuntimeError(f"Supabase upsert {table} failed {resp.status_code}: {resp.text[:500]}")
+
+
+def sb_rpc(fn: str, payload: dict):
+    url, headers = _sb()
+    resp = requests.post(f"{url}/rest/v1/rpc/{fn}", headers=headers, data=json.dumps(payload), timeout=30)
     if resp.status_code >= 300:
-        raise RuntimeError(f"Supabase upsert failed {resp.status_code}: {resp.text[:500]}")
+        raise RuntimeError(f"Supabase rpc {fn} failed {resp.status_code}: {resp.text[:500]}")
+    return resp.json()
 
 
-# ---------------------------------------------------------------- main
+def upsert_stats(rows: list[dict]) -> None:
+    sb_upsert("player_game_stats", rows, "game_id,player_id")
+
+
+# ---------------------------------------------------------------- jobs
 
 def target_dates(args) -> list[date]:
     if args.date:
@@ -169,13 +242,7 @@ def target_dates(args) -> list[date]:
     return [today_et - timedelta(days=i) for i in range(args.days, 0, -1)]
 
 
-def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--date", help="美東日期 YYYY-MM-DD")
-    p.add_argument("--days", type=int, default=2, help="往回抓幾天（預設 2，可吸收數據修正）")
-    p.add_argument("--dry-run", action="store_true")
-    args = p.parse_args()
-
+def job_stats(args) -> None:
     total = 0
     for d in target_dates(args):
         games = list_games(d)
@@ -201,8 +268,46 @@ def main() -> int:
         else:
             upsert_stats(day_rows)
         total += len(day_rows)
+    print(f"Stats done. {total} player rows {'parsed' if args.dry_run else 'upserted'}.")
 
-    print(f"Done. {total} player rows {'parsed' if args.dry_run else 'upserted'}.")
+
+def job_players(args) -> None:
+    rows: list[dict] = []
+    for t in list_teams():
+        roster = http_get_json(f"{ESPN_BASE}/teams/{t['id']}/roster")
+        rows.extend(parse_roster(roster, t["abbr"]))
+        time.sleep(0.3)
+    print(f"Players: {len(rows)} on {len({r['team'] for r in rows})} teams")
+    if rows and not args.dry_run:
+        sb_upsert("players", rows, "player_id")
+
+
+def job_injuries(args) -> None:
+    teams = {t["name"]: t["abbr"] for t in list_teams()}
+    rows = parse_injuries(http_get_json(f"{ESPN_BASE}/injuries"), teams)
+    print(f"Injuries: {len(rows)} players")
+    if args.dry_run:
+        for r in rows[:5]:
+            print(f"    {r['player_name']:<24} {r['team']:<4} {r['status']}  id={r['player_id']}")
+        return
+    # 保險：ESPN 回傳空清單時不要把現有傷兵全部清掉
+    if not rows:
+        print("  ESPN 回傳 0 筆，略過更新")
+        return
+    print(f"  synced {sb_rpc('sync_injuries', {'p_rows': rows})} rows")
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--job", choices=["stats", "players", "injuries"], action="append",
+                   help="要執行的工作，可重複指定；預設只跑 stats")
+    p.add_argument("--date", help="美東日期 YYYY-MM-DD（stats）")
+    p.add_argument("--days", type=int, default=2, help="往回抓幾天（stats，預設 2，可吸收數據修正）")
+    p.add_argument("--dry-run", action="store_true")
+    args = p.parse_args()
+
+    for job in args.job or ["stats"]:
+        {"stats": job_stats, "players": job_players, "injuries": job_injuries}[job](args)
     return 0
 
 
