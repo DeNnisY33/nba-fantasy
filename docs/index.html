@@ -187,6 +187,7 @@ footer .rules b { color: var(--ink); font-family: var(--font-display); font-size
     <a href="#standings">排行榜</a>
     <a href="#charts">圖表</a>
     <a href="#team">球隊與傷兵</a>
+    <a href="#players">球員排名</a>
     <a href="#trades">交易區</a>
   </nav>
 
@@ -288,6 +289,24 @@ footer .rules b { color: var(--ink); font-family: var(--font-display); font-size
           <thead><tr><th>生效日</th><th>隊伍</th><th>放掉</th><th>撿進</th></tr></thead>
           <tbody id="changes"></tbody>
         </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 球員排名 -->
+  <section class="view" id="v-players" hidden>
+    <div>
+      <h2>2K 能力值排名 <span class="sub" id="pb-sub"></span></h2>
+      <div class="panel panel-pad" style="display:grid;gap:12px">
+        <div class="form-row">
+          <input class="inp" id="pb-q" placeholder="搜尋球員名字或球隊代號（例如 LAL）" style="flex:1;min-width:180px">
+          <select class="inp" id="pb-pos" aria-label="位置"><option value="">全部位置</option><option value="G">G 後衛</option><option value="F">F 前鋒</option><option value="C">C 中鋒</option></select>
+          <select class="inp" id="pb-own" aria-label="所屬"><option value="">全部球員</option><option value="free">只看自由球員</option><option value="owned">只看已被選走</option></select>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th class="r">#</th><th>球員</th><th class="r">2K</th><th>所屬</th><th class="r hide-sm">場均 FP</th><th class="hide-sm">狀態</th></tr></thead>
+          <tbody id="pb-body"></tbody>
+        </table></div>
       </div>
     </div>
   </section>
@@ -685,6 +704,25 @@ function renderFreeAgents() {
   $("fa-q").oninput = (e) => { faQuery = e.target.value; const pos = e.target.selectionStart; renderFreeAgents(); const el = $("fa-q"); el.focus(); el.setSelectionRange(pos, pos); };
 }
 
+// ---------- 球員排名 ----------
+async function renderPlayers() {
+  if (!S.board) { $("pb-body").innerHTML = `<tr><td colspan="6" class="empty">載入中…</td></tr>`; S.board = await apiAll("player_board?select=*&order=ovr.desc,name.asc"); }
+  const q = $("pb-q").value.trim().toLowerCase(), pos = $("pb-pos").value, own = $("pb-own").value;
+  const rows = S.board.filter((p) => (!q || p.name.toLowerCase().includes(q) || (p.team || "").toLowerCase() === q)
+    && (!pos || p.position === pos) && (!own || (own === "free" ? !p.member_id : !!p.member_id)));
+  const snap = S.board[0]?.snapshot_date;
+  $("pb-sub").textContent = `${S.board.length} 位球員${snap ? `・能力值日期 ${snap}` : ""}${S.settings.ratings_locked === "true" ? "（已鎖定）" : ""}`;
+  $("pb-body").innerHTML = rows.map((p) => `<tr>
+    <td class="r num muted">${p.ovr_rank}</td>
+    <td><div class="pl"><img src="${esc(p.headshot || "")}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <div><div class="nm">${esc(p.name)}</div><div class="meta">${esc(p.team || "—")} · ${esc(p.position || "—")}${p.pos_2k ? ` (${esc(p.pos_2k)})` : ""}</div></div></div></td>
+    <td class="r">${ovrChip(p.ovr)}</td>
+    <td>${p.member_id ? `<span class="dot" style="background:${color(p.member_id)}"></span>${esc(p.member_name)}<span class="tm">・${p.slot === "active" ? "名單內" : "名單外"}</span>` : `<span class="muted">自由球員</span>`}</td>
+    <td class="r num hide-sm">${p.avg_fp != null ? fmt(p.avg_fp) : "—"}</td>
+    <td class="hide-sm">${p.injury_status ? injChip(p) : ""}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">沒有符合條件的球員</td></tr>`;
+}
+["pb-q", "pb-pos", "pb-own"].forEach((id) => $(id).addEventListener(id === "pb-q" ? "input" : "change", renderPlayers));
+
 // ---------- 交易區 ----------
 const needed = () => +(S.settings.trade_approvals_needed ?? 2);
 let tradeTo = null, giveSel = [], getSel = [];
@@ -802,7 +840,7 @@ document.addEventListener("click", async (e) => {
 });
 
 // ---------- 路由 ----------
-const VIEWS = ["standings", "charts", "team", "trades"];
+const VIEWS = ["standings", "charts", "team", "players", "trades"];
 function currentView() { const h = location.hash.slice(1); return VIEWS.includes(h) ? h : "standings"; }
 function renderAll() {
   const v = currentView();
@@ -811,6 +849,7 @@ function renderAll() {
   if (v === "standings") { renderStandings(); renderWeekly(); renderDaily(); }
   if (v === "charts") renderCharts();
   if (v === "team") renderTeam();
+  if (v === "players") renderPlayers();
   if (v === "trades") renderTrades();
   updateBadge();
 }
